@@ -1,0 +1,23 @@
+{
+  "name": "night-library-counter",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node tools/launch.mjs",
+    "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5178 --strictPort",
+    "test": "node --test tests/transaction.test.js",
+    "test:browser": "node tests/browser.mjs",
+    "test:launch": "node --test tests/launch.test.mjs",
+    "test:audio": "node tests/audio.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "^7.1.7",
+    "playwright": "^1.55.0"
+  }
+}

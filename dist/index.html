@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#141d1d" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%231c2926'/%3E%3Cpath d='M27 7a14 14 0 1 0 6 23A13 13 0 0 1 27 7' fill='%23d4b780'/%3E%3C/svg%3E"
+    />
+    <title>夜阑图书馆 · Nightfall Library</title>
+    <script type="module" crossorigin src="/assets/index-BCNbB35k.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-D6m9EkfL.css">
+  </head>
+  <body>
+    <main id="game" aria-label="夜阑图书馆，三维借阅柜台"></main>
+    <div class="patina" aria-hidden="true"></div>
+    <header class="masthead">
+      <div class="brand">
+        <span class="moon">☾</span>
+        <div>NIGHTFALL PUBLIC LIBRARY<span>夜阑图书馆</span></div>
+      </div>
+      <div class="shift">
+        <span class="clock">21:47</span>
+      </div>
+    </header>
+    <section id="welcome">
+      <div class="welcome-copy">
+        <p class="eyebrow">DAY 01</p>
+        <h1>夜间值班</h1>
+        <p class="intro">
+          雨还没有停，图书馆仍亮着灯。<br />坐在熟悉的柜台后，开始你的第一晚值班。
+        </p>
+        <button id="start" class="start-button">
+          开始值班 <span>↗</span>
+        </button>
+        <div class="case-select">
+          <span>练习访客</span
+          ><button data-case="A" aria-pressed="true">01</button
+          ><button data-case="B" aria-pressed="false">02</button
+          ><span class="case-note">每次仅接待一人</span>
+        </div>
+        <p class="start-note">建议佩戴耳机 · 鼠标与键盘</p>
+        <button id="settings-open" class="text-button">声音与操作</button>
+      </div>
+    </section>
+    <section id="task" hidden>
+      <h2 id="task-title">处理借阅</h2>
+    </section>
+    <div id="opening" hidden>DAY 01<span>21:47</span></div>
+    <aside id="checklist" hidden>
+      <span class="paper-clip"></span>
+      <p class="paper-kicker">NIGHTFALL PUBLIC LIBRARY</p>
+      <h3>借阅核验单</h3>
+      <p class="paper-sub">请对照证件照片与面前的访客</p>
+      <div class="check-row">
+        <span>照片与本人一致</span>
+        <div>
+          <button id="pass" aria-label="照片一致" aria-pressed="false">✓</button
+          ><button id="fail" aria-label="照片不一致" aria-pressed="false">
+            ×
+          </button>
+        </div>
+      </div>
+      <p class="paper-foot">按你的观察记录 · 再次点击可取消</p>
+    </aside>
+    <div id="reticle" hidden aria-hidden="true"></div>
+    <div id="interact" hidden><kbd>E</kbd><span></span></div>
+    <div id="inspect-help" hidden></div>
+    <section id="dialogue" hidden aria-live="polite">
+      <span class="speaker">访客</span>
+      <p></p>
+      <span class="dialogue-mark">◦</span>
+    </section>
+    <div id="toast" hidden aria-live="polite"></div>
+    <section id="complete" hidden>
+      <p>本次借阅处理已记录</p>
+    </section>
+    <section id="settings" hidden aria-label="声音与操作">
+      <h2>声音与操作</h2>
+      <div class="sound-controls">
+        <label class="ambience-control"
+          >环境
+          <input
+            id="ambience-volume"
+            aria-label="环境音量"
+            type="range"
+            min="0"
+            max="100"
+            value="28"
+        /></label>
+        <button id="sound" aria-label="切换环境声音">声音 · 开</button>
+      </div>
+      <p>
+        指向物件，按 E 拿起或放置。<br />检查时按 E 放回桌面，Esc
+        结束检查并手持。<br />拖动旋转书籍，F 翻开；R 再次检查手持物。<br />平时按
+        Esc 打开此页。
+      </p>
+      <button id="settings-close" class="text-button">返回柜台</button>
+      <button id="again" class="text-button">重新值班</button>
+    </section>
+    <pre id="dev-panel" hidden></pre>
+    <div id="fatal" hidden role="alert"></div>
+  </body>
+</html>
