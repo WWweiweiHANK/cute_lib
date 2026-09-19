@@ -19,10 +19,21 @@ import { Transaction } from "./transaction.js";
 import { returnCases } from "./return-cases.js";
 import { CustomerSequenceController, daySequence } from "./memory-loop.js";
 import { LibraryAudio } from "./audio.js";
+import { ClosingReading, personalReadingBook } from './closing-reading.js';
+import { NightShelvingController } from './night-shelving.js';
+import { buildShelvingWorld, moveWalker } from './night-world.js';
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const DEV_MODE = query.get("dev") === "1";
+const entryMode = query.get('mode');
+let gamePhase = 'DAY_COUNTER', personalHeld = false, nightHover = null;
+const reading = new ClosingReading(), shelving = new NightShelvingController();
+const keys = new Set();
+const isNight = () => gamePhase.startsWith('NIGHT_');
+const interactionPhase = () => gamePhase === 'DAY_COUNTER' ? tx.phase :
+  cameraMode === 'OBJECT_INSPECT' ? 'BOOK_INSPECT' :
+  (personalHeld || shelving.heldBookId) ? 'BOOK_HELD' : 'ITEMS_PLACED';
 let selectedCase = query.get("case") === "B" ? "B" : "A";
 const isMemory = query.get("mode") === "memory";
 const sequence = isMemory ? new CustomerSequenceController() : null;
@@ -79,6 +90,7 @@ let taskTimer, helpTimer, lastUIState;
 const shownHelp = new Set();
 let nextPaper = 37,
   nextWood = 53;
+let nextFootstep = 0;
 const pointer = new THREE.Vector2(0, 0),
   MAX_YAW = THREE.MathUtils.degToRad(5),
   MAX_PITCH = THREE.MathUtils.degToRad(3);
@@ -136,6 +148,12 @@ const grain = new ShaderPass({
 });
 composer.addPass(grain);
 const env = buildEnvironment(scene, { returnMode: isReturn });
+const nightWorld = buildShelvingWorld(scene, env.sortingShelves, shelving);
+const personalModel = makeBook(personalReadingBook);
+const personalHome = [.7, 1.105, 1.69];
+personalModel.position.fromArray(personalHome);
+personalModel.rotation.set(-Math.PI / 2, 0, -.09);
+scene.add(personalModel);
 // A close, soft reflection from the work lamp keeps held paper legible from the seated side.
 const inspectionLight = new THREE.PointLight("#fff0d0", 1.3, 1.65, 2);
 inspectionLight.position.set(-0.25, 0.22, 0.12);
@@ -201,6 +219,7 @@ target("reject", [0.7, 0.18, 0.66], [-1.14, 1.14, 0.87]);
 targets.return = targets.reject;
 if (isReturn) targets.return.userData.name = "return";
 target("customer", [0.75, 1.25, 0.45], [0, 1.2, -0.03]);
+target('personalBook', [.47, .12, .61], personalHome);
 // Rectangles use the same normalized coordinates as the printed card texture.
 const cardFields = {
   photo: [47 / 1024, 169 / 640, 260 / 1024, 315 / 640],
@@ -313,11 +332,11 @@ function dialogue(text, speaker = "访客", seconds = 3.5) {
     seconds * 1000,
   );
 }
-function toast(text) {
+function toast(text, duration = 2500) {
   clearTimeout(toastTimer);
   $("toast").textContent = text;
   $("toast").hidden = false;
-  toastTimer = setTimeout(() => ($("toast").hidden = true), 2500);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), duration);
 }
 function setTask(title) {
   $("task-title").textContent = title;
@@ -326,7 +345,7 @@ function setTask(title) {
   taskTimer = setTimeout(() => ($("task").hidden = true), 2800);
 }
 function updateUI() {
-  const s = tx.phase;
+  const s = interactionPhase();
   if (s !== lastUIState) {
     clearTimeout(helpTimer);
     $("inspect-help").hidden = true;
@@ -394,6 +413,15 @@ async function start() {
   setTimeout(() => ($("opening").hidden = true), 2000);
   $("reticle").hidden = false;
   await wait(1.3);
+  if (entryMode === 'closing') return beginClosingReading();
+  if (entryMode === 'shelving') {
+    env.setClosed();
+    [1, 2, 3, 4].forEach(page => reading.readPages.add(page));
+    document.querySelector('.clock').textContent = '22:00';
+    camera.position.set(3.15, 1.85, 2.65);
+    enterNight();
+    return;
+  }
   await arriveVisit();
 }
 async function arriveVisit() {
@@ -485,7 +513,7 @@ async function closeCover() {
   );
 }
 async function exitInspect() {
-  if (!tx.dispatch("EXIT_INSPECT")) return;
+  if (gamePhase === 'DAY_COUNTER' ? !tx.dispatch('EXIT_INSPECT') : interactionPhase() !== 'BOOK_INSPECT') return;
   busy = true;
   dragging = false;
   press = null;
@@ -493,8 +521,10 @@ async function exitInspect() {
   updateUI();
   if (bookOpen) await closeCover();
   await transform(book, camera, heldBookPosition, heldBookRotation);
-  cameraMode = "COUNTER_FREE";
+  cameraMode = isNight() ? 'FREE_LOOK' : 'COUNTER_FREE';
   busy = false;
+  updateUI();
+  if (gamePhase === 'CLOSING_READING' && reading.ready) await finishReading();
 }
 async function putBack() {
   if (!tx.dispatch("PUT_BOOK")) return;
@@ -505,16 +535,16 @@ async function putBack() {
   updateUI();
 }
 async function inspectAgain() {
-  if (!tx.dispatch("INSPECT_AGAIN")) return;
+  if (gamePhase === 'DAY_COUNTER' ? !tx.dispatch('INSPECT_AGAIN') : interactionPhase() !== 'BOOK_HELD') return;
   busy = true;
   cameraMode = "OBJECT_INSPECT";
   updateUI();
   audio.paper();
-  await transform(book, camera, [0.12, -0.025, -1.35], [0.02, -0.07, 0.015]);
+  await transform(book, camera, [0.12, gamePhase === 'CLOSING_READING' ? -.13 : -0.025, -1.35], [0.02, -0.07, 0.015]);
   busy = false;
 }
 async function flip(direction) {
-  if (tx.phase !== "BOOK_INSPECT" || busy) return;
+  if (interactionPhase() !== "BOOK_INSPECT" || busy) return;
   const next = THREE.MathUtils.clamp(
     bookPage + direction,
     0,
@@ -627,9 +657,128 @@ async function finishVisit() {
   $("complete").hidden = false;
   setTimeout(() => ($("complete").hidden = true), 3000);
   $("dialogue").hidden = true;
+  // The final visitor's record stays intact; closing is a separate high-level phase.
+  guard(beginClosingReading());
+}
+async function beginClosingReading() {
+  await wait(2.5);
+  gamePhase = 'CLOSING_READING';
+  busy = false;
+  document.querySelector('.clock').textContent = reading.time;
+  $('complete').hidden = true;
+  toast('离闭馆还有一会儿。');
+}
+async function pickupPersonal() {
+  if (personalHeld || gamePhase !== 'CLOSING_READING') return;
+  book = personalModel;
+  personalHeld = true;
+  bookOpen = false; bookPage = 0;
+  angularX = angularY = 0;
+  busy = true;
+  audio.paper();
+  await transform(book, camera, heldBookPosition, heldBookRotation);
+  busy = false;
+  updateUI();
+}
+async function returnPersonal() {
+  busy = true;
+  await transform(book, scene, personalHome, [-Math.PI / 2, 0, -.09], .45);
+  audio.paper(.018);
+  personalHeld = false;
+  busy = false;
+  updateUI();
+}
+async function finishReading() {
+  await returnPersonal();
+  busy = true;
+  dialogue('好了，下班了。', '你', 2);
+  await wait(2.7);
+  gamePhase = 'CLOSING_TRANSITION';
+  env.setClosed(0);
+  audio.tone(185, .07, .015);
+  await tween(.6, t => env.setClosed(smooth(t)));
+  const from = camera.position.clone();
+  audio.paper(.016);
+  await tween(1, t => {
+    camera.position.y = from.y + .18 * smooth(t);
+    camera.position.z = from.z + .08 * smooth(t);
+  });
+  enterNight();
+}
+function enterNight() {
+  gamePhase = 'NIGHT_FREE_ROAM';
+  cameraMode = 'FREE_LOOK';
+  focusBlend = 0;
+  // Keep nearby paper readable away from the counter, without lighting distant scenery.
+  inspectionLight.position.set(0, .18, -.35);
+  inspectionLight.intensity = 1.5;
+  inspectionLight.distance = 2.4;
+  keys.clear();
+  busy = false;
+  toast('WASD 行走 · 点击画面环顾 · R 查看手中的书');
+}
+async function nightInteract() {
+  if (busy || !nightHover) return;
+  const hit = nightHover;
+  if (!shelving.heldBookId) {
+    const id = hit.bookId || hit.slot?.occupantBookId;
+    if (!shelving.pickup(id)) return;
+    if (gamePhase === 'NIGHT_SHELVING_COMPLETE') $('toast').hidden = true;
+    book = nightWorld.books.get(id);
+    busy = true;
+    gamePhase = 'NIGHT_SHELVING';
+    bookPage = 0; bookOpen = false;
+    angularX = angularY = 0;
+    audio.paper(.022);
+    await transform(book, camera, heldBookPosition, heldBookRotation);
+    busy = false;
+    updateUI();
+  } else if (hit.slot && !hit.slot.occupantBookId) {
+    const id = shelving.heldBookId, slot = hit.slot;
+    busy = true;
+    const group = env.sortingShelves.get(slot.shelfId);
+    const at = [...slot.localPosition];
+    at[2] += .2;
+    await transform(book, group, at, slot.localRotation, .22);
+    await transform(book, group, slot.localPosition, slot.localRotation, .16);
+    shelving.place(id, slot.shelfId, slot.slotId);
+    audio.paper(.018);
+    audio.tone(110, .07, .006);
+    busy = false;
+    if (shelving.isTaskComplete()) {
+      gamePhase = 'NIGHT_SHELVING_COMPLETE';
+      toast('书都收起来了。', 1400);
+    }
+    updateUI();
+  }
+}
+function updateNightHover() {
+  nightHover = null;
+  $('interact').hidden = true;
+  $('reticle').hidden = cameraMode === 'OBJECT_INSPECT' || !$('settings').hidden;
+  $('reticle').style.left = '50%'; $('reticle').style.top = '50%';
+  renderer.domElement.style.cursor = 'default';
+  if (!busy && cameraMode === 'FREE_LOOK' && $('settings').hidden) {
+    raycaster.setFromCamera(new THREE.Vector2(), camera);
+    // Measure reach from the player's hand height so floor books remain reachable while standing.
+    const hand = new THREE.Vector3(camera.position.x, .8, camera.position.z);
+    const hits = raycaster.intersectObjects(scene.children.filter(o => o !== camera && !Object.values(targets).includes(o)), true);
+    for (const hit of hits) {
+      let node = hit.object, visible = true, bookId;
+      while (node) { visible &&= node.visible; bookId ||= node.userData.shelvingBookId; node = node.parent; }
+      if (!visible) continue;
+      if (hit.distance > 2.4 || hand.distanceTo(hit.point) > 1.5) break;
+      const slot = shelving.slots.find(s => s.slotId === hit.object.userData.slotId);
+      if (slot || bookId) nightHover = {slot, bookId, distance: hand.distanceTo(hit.point)};
+      // Transparent window panes do not block interactions; solid furniture does.
+      if (nightHover || !hit.object.material?.transparent) break;
+    }
+  }
+  const actionable = nightHover && (shelving.heldBookId ? nightHover.slot && !nightHover.slot.occupantBookId : nightHover.bookId || nightHover.slot?.occupantBookId);
+  $('reticle').classList.toggle('hot', !!actionable);
 }
 function damageAtPointer() {
-  if (!isReturn || tx.phase !== "BOOK_INSPECT" || busy || !$("settings").hidden)
+  if (gamePhase !== 'DAY_COUNTER' || !isReturn || tx.phase !== "BOOK_INSPECT" || busy || !$("settings").hidden)
     return null;
   raycaster.setFromCamera(pointer, camera);
   return findBookDamage(book, raycaster, bookPage);
@@ -791,6 +940,9 @@ function saveRecord() {
 function allowedTargets() {
   if (busy || !started || !$("settings").hidden || !$("card-choice").hidden)
     return [];
+  if (gamePhase === 'CLOSING_READING')
+    return cameraMode === 'OBJECT_INSPECT' ? [] : ['personalBook'];
+  if (gamePhase !== 'DAY_COUNTER') return [];
   if (tx.phase === "ITEMS_PLACED")
     return isReturn || tx.cardReturned ? ["book"] : ["card", "book"];
   if (tx.phase === "ID_HELD") return ["customer"];
@@ -808,8 +960,10 @@ const labels = {
   scanner: "放到借书机 · 借出",
   reject: "放入暂存盘 · 拒借",
   return: "放入归还托盘 · 收书",
+  personalBook: '拿起 / 放下',
 };
 function updateHover() {
+  if (isNight()) return updateNightHover();
   const names = allowedTargets();
   raycaster.setFromCamera(pointer, camera);
   const hits = raycaster.intersectObjects(
@@ -825,16 +979,16 @@ function updateHover() {
   $("reticle").hidden =
     !started ||
     !$("settings").hidden ||
-    tx.phase.endsWith("INSPECT") ||
-    tx.phase === "TRANSACTION_COMPLETE";
+    interactionPhase().endsWith("INSPECT") ||
+    (gamePhase === 'DAY_COUNTER' && tx.phase === "TRANSACTION_COMPLETE");
   $("interact").hidden = !hover;
   if (hover) {
-    $("interact").querySelector("span").textContent = labels[hover];
+    $("interact").querySelector("span").textContent = hover === 'personalBook' ? (personalHeld ? '放下' : '拿起') : labels[hover];
     $("interact").style.left = `${Math.min(x + 19, innerWidth - 265)}px`;
     $("interact").style.top = `${Math.min(y + 19, innerHeight - 90)}px`;
   }
   renderer.domElement.style.cursor =
-    tx.phase === "BOOK_INSPECT"
+    interactionPhase() === "BOOK_INSPECT"
       ? dragging
         ? "grabbing"
         : damageAtPointer()
@@ -847,7 +1001,8 @@ function updateHover() {
 async function interact() {
   if (busy || !hover) return;
   const which = hover;
-  if (which === "card" || which === "book") await pickup(which);
+  if (which === 'personalBook') await (personalHeld ? returnPersonal() : pickupPersonal());
+  else if (which === "card" || which === "book") await pickup(which);
   else if (which === "customer") {
     clearTimeout(dialogueTimer);
     $("dialogue").hidden = true;
@@ -980,7 +1135,7 @@ $("settings-open").addEventListener(
 );
 $("settings-close").addEventListener(
   "click",
-  () => ($("settings").hidden = true),
+  () => { $('settings').hidden = true; if (isNight()) requestLook(); },
 );
 $("start").addEventListener("click", () => guard(start()));
 $("sound").addEventListener("click", () => {
@@ -991,7 +1146,7 @@ $("ambience-volume").addEventListener("input", (event) =>
 );
 $("again").addEventListener("click", () => location.reload());
 $("case-label").textContent = isReturn ? "练习还书访客" : "练习借书访客";
-$("case-label").parentElement.hidden = isMemory;
+$("case-label").parentElement.hidden = isMemory || ['closing', 'shelving'].includes(entryMode);
 $("complete").querySelector("p").textContent = isReturn
   ? "本次还书处理已记录"
   : "本次借阅处理已记录";
@@ -1000,7 +1155,7 @@ document.querySelectorAll("[data-mode]").forEach((button) => {
     "aria-pressed",
     String(
       button.dataset.mode ===
-        (isMemory ? "memory" : isReturn ? "return" : "borrow"),
+        (entryMode || 'borrow'),
     ),
   );
   button.addEventListener("click", () => {
@@ -1030,6 +1185,10 @@ window.addEventListener("keydown", (event) => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
   // IMEs may report "Process" as key while preserving the physical key code.
   const key = event.code === "KeyR" ? "r" : event.key.toLowerCase();
+  if (isNight() && $('settings').hidden && document.pointerLockElement === renderer.domElement &&
+      ['KeyW', 'KeyA', 'KeyS', 'KeyD'].includes(event.code)) {
+    keys.add(event.code); event.preventDefault();
+  }
   if (!$("settings").hidden) {
     if (key === "escape") {
       $("settings").hidden = true;
@@ -1046,6 +1205,8 @@ window.addEventListener("keydown", (event) => {
     return;
   if (["r", "escape"].includes(key)) event.preventDefault();
   if (key === "escape") {
+    keys.clear();
+    if (document.pointerLockElement) document.exitPointerLock();
     if (!$("card-choice").hidden) $("card-choice").hidden = true;
     else $("settings").hidden = false;
     dragging = false;
@@ -1053,15 +1214,37 @@ window.addEventListener("keydown", (event) => {
     angularX = angularY = 0;
   }
   if (key === "r" && $("card-choice").hidden)
-    guard(tx.phase === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
+    guard(interactionPhase() === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
+});
+window.addEventListener('keyup', event => keys.delete(event.code));
+function requestLook() {
+  renderer.domElement.requestPointerLock()?.catch(() => toast('点击画面继续环顾。'));
+}
+document.addEventListener('pointerlockchange', () => {
+  keys.clear(); press = null; dragging = false; angularX = angularY = 0;
+  if (isNight() && !document.pointerLockElement && started) $('settings').hidden = false;
 });
 window.addEventListener("pointermove", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
+  if (isNight()) {
+    if (document.pointerLockElement !== renderer.domElement || busy) return;
+    if (cameraMode === 'OBJECT_INSPECT') {
+      if (press && (event.movementX || event.movementY)) {
+        dragging = true;
+        angularY = event.movementX * .005; angularX = event.movementY * .005;
+        book.rotateY(angularY); book.rotateX(angularX);
+      }
+    } else if (cameraMode === 'FREE_LOOK') {
+      camera.rotation.y -= event.movementX * .002;
+      camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - event.movementY * .002, -1.35, 1.25);
+    }
+    return;
+  }
   pointer.set(
     (event.clientX / innerWidth) * 2 - 1,
     1 - (event.clientY / innerHeight) * 2,
   );
-  if (tx.phase === "BOOK_INSPECT") {
+  if (interactionPhase() === "BOOK_INSPECT") {
     if (press && !busy) {
       const distance = Math.hypot(
         event.clientX - press.x,
@@ -1089,7 +1272,8 @@ window.addEventListener("pointermove", (event) => {
 renderer.domElement.addEventListener("pointerdown", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
   if (event.button !== 0) return;
-  if (tx.phase === "BOOK_INSPECT" && !busy) {
+  if (isNight() && document.pointerLockElement !== renderer.domElement) { requestLook(); return; }
+  if (interactionPhase() === "BOOK_INSPECT" && !busy) {
     pointer.set(
       (event.clientX / innerWidth) * 2 - 1,
       1 - (event.clientY / innerHeight) * 2,
@@ -1105,8 +1289,9 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
     angularX = angularY = 0;
     lastX = event.clientX;
     lastY = event.clientY;
-    renderer.domElement.setPointerCapture(event.pointerId);
+    if (!isNight()) renderer.domElement.setPointerCapture(event.pointerId);
   } else {
+    if (isNight()) { updateNightHover(); guard(nightInteract()); return; }
     pointer.set(
       (event.clientX / innerWidth) * 2 - 1,
       1 - (event.clientY / innerHeight) * 2,
@@ -1118,7 +1303,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
 renderer.domElement.addEventListener(
   "wheel",
   (event) => {
-    if (tx.phase !== "BOOK_INSPECT" || !$("settings").hidden) return;
+    if (interactionPhase() !== "BOOK_INSPECT" || !$("settings").hidden) return;
     event.preventDefault();
     if (event.deltaY) guard(flip(Math.sign(event.deltaY)));
   },
@@ -1150,6 +1335,7 @@ window.addEventListener("pointercancel", () => {
   angularX = angularY = 0;
 });
 window.addEventListener("blur", () => {
+  keys.clear();
   press = null;
   dragging = false;
   angularX = angularY = 0;
@@ -1164,6 +1350,21 @@ window.addEventListener("resize", () => {
 if (DEV_MODE) {
   $("dev-panel").hidden = false;
   window.library = {
+    get night() {
+      return structuredClone({ gamePhase, cameraMode, position: camera.position.toArray(),
+        yaw: camera.rotation.y, pitch: camera.rotation.x, pointerLocked: !!document.pointerLockElement,
+        heldBookId: shelving.heldBookId, heldCategory: shelving.books.get(shelving.heldBookId)?.category,
+        hoveredSlot: nightHover?.slot, hoveredBook: nightHover?.bookId, distance: nightHover?.distance,
+        pending: shelving.getPendingBooks(), result: shelving.result,
+        slots: shelving.slots, books: [...shelving.books.values()],
+        time: reading.time, page: reading.page, dwell: reading.dwell, advances: reading.advances,
+        closingReady: reading.ready, closed: env.closed, personalHeld,
+      });
+    },
+    nightPosition(id) {
+      const object = nightWorld.books.get(id) || nightWorld.slotTargets.find(o => o.userData.slotId === id);
+      return object?.getWorldPosition(new THREE.Vector3()).toArray();
+    },
     get state() {
       return tx.state;
     },
@@ -1285,7 +1486,7 @@ function frame(now) {
     if (!busy) audio.tone(134, 0.12, 0.008);
     nextWood = time + 53;
   }
-  if (cameraMode !== "OBJECT_INSPECT") {
+  if (!isNight() && gamePhase !== 'CLOSING_TRANSITION' && cameraMode !== "OBJECT_INSPECT") {
     const follow = 1 - Math.exp(-8 * dt);
     const dialogueYaw =
       focusYaw +
@@ -1320,8 +1521,34 @@ function frame(now) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
   }
-  camera.position.z = 2.64 - 0.03 * focusBlend;
-  camera.position.y = 1.67 + Math.sin(time * 0.8) * 0.0009;
+  if (!isNight() && gamePhase !== 'CLOSING_TRANSITION') {
+    camera.position.z = 2.64 - 0.03 * focusBlend;
+    camera.position.y = 1.67 + Math.sin(time * 0.8) * 0.0009;
+  }
+  if (gamePhase === 'CLOSING_READING') {
+    const page = cameraMode === 'OBJECT_INSPECT' && !busy && $('settings').hidden && !dragging ? bookPage : 0;
+    if (reading.update(page, dt)) {
+      const clock = document.querySelector('.clock');
+      clock.textContent = reading.time;
+      clock.animate([{opacity: .3}, {opacity: 1}], {duration: 600});
+      env.setReadingProgress(reading.advances / 4);
+      if (reading.ready) toast('已经到闭馆时间了。');
+    }
+  }
+  if (isNight()) {
+    if (gamePhase === 'NIGHT_FREE_ROAM' && shelving.getPendingBooks().length) gamePhase = 'NIGHT_SHELVING';
+    if (!busy && cameraMode === 'FREE_LOOK' && $('settings').hidden && document.pointerLockElement) {
+      const forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS'));
+      const sideways = Number(keys.has('KeyD')) - Number(keys.has('KeyA'));
+      const moving = moveWalker(camera.position, camera.rotation.y, forward, sideways, dt);
+      if (moving && time > nextFootstep) {
+        audio.tone(115, .09, .014);
+        audio.paper(.006);
+        nextFootstep = time + .57;
+      }
+      if (moving && shelving.heldBookId) book.position.y = heldBookPosition[1] + Math.sin(time * 6) * .003;
+    }
+  }
   if (person.visible) {
     person.userData.body.position.y = Math.sin(time * 1.3) * 0.004;
     if (!busy) {
@@ -1333,7 +1560,7 @@ function frame(now) {
     person.userData.eyes.forEach((eye) => (eye.scale.y = sy));
   }
   if (
-    tx.phase === "BOOK_INSPECT" &&
+    interactionPhase() === "BOOK_INSPECT" &&
     !dragging &&
     !press &&
     !busy &&
@@ -1360,5 +1587,7 @@ function frame(now) {
       (sequence
         ? `\n交易: ${daySequence.indexOf(visit.step) + 1} / 3\n副本: ${visit.book.instanceId}\n持有人: ${visit.book.holderCustomerId ?? "—"}\n损坏: ${visit.book.damages.map((d) => d.id + ":" + d.createdAt).join(", ")}\n决定: ${JSON.stringify(tx.damageDecisions)}`
         : "");
+  if (DEV_MODE && gamePhase !== 'DAY_COUNTER')
+    $('dev-panel').textContent = `${gamePhase} / ${cameraMode}\n${reading.time} · page ${bookPage} · dwell ${reading.dwell.toFixed(1)} · advances ${reading.advances} · ready ${reading.ready}\nheld ${shelving.heldBookId || '—'} / ${shelving.books.get(shelving.heldBookId)?.category || '—'}\nslot ${nightHover?.slot?.slotId || '—'} · occupied ${nightHover?.slot?.occupantBookId || '—'}\npending ${shelving.getPendingBooks().length} · correct ${shelving.getFinalLayout().filter(p => p.isCorrect).length} · wrong ${shelving.getFinalLayout().filter(p => !p.isCorrect).length}\nposition ${camera.position.toArray().map(n => n.toFixed(2)).join(', ')} · reach ${nightHover?.distance?.toFixed(2) || '—'}`;
 }
 requestAnimationFrame(frame);

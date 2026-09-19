@@ -638,6 +638,7 @@ footer {
 #settings-open {
   margin-top: 12px;
 }
+.case-select { flex-wrap: wrap; }
 @keyframes brief-fade {
   0%,
   100% {

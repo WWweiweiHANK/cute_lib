@@ -179,8 +179,11 @@ try {
     assert.equal(final.book.holderCustomerId, null);
     assert.equal(final.book.damages.length, 2);
     assert.equal(final.completed, 3);
+    await page.waitForFunction(() => window.library.night.gamePhase === 'CLOSING_READING');
+    assert.equal(await page.evaluate(() => window.library.night.closed), false);
+    assert.deepEqual(await page.evaluate(() => window.library.record), records[2]);
     console.log(
-      `PASS memory ${route}: persistent book/person, quiet gaps, decisions and final acceptance`,
+      `PASS memory ${route}: persistent book/person, quiet gaps, decisions, final acceptance and natural closing handoff`,
     );
   }
   await page.goto(`${base}/?mode=memory`);

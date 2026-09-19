@@ -163,6 +163,8 @@ async function play(caseId, decision) {
   await page.screenshot({
     path: `artifacts/${caseId}-${decision}-complete.png`,
   });
+  await page.waitForFunction(() => window.library.night.gamePhase === 'CLOSING_READING');
+  assert.equal(await page.evaluate(() => window.library.night.closed), false);
 }
 try {
   await play("A", "borrow");

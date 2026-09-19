@@ -10,8 +10,10 @@ import {
   rng,
   seeded,
 } from "./assets.js";
+import { shelfCategories } from './night-shelving.js';
 
 export function buildEnvironment(scene, { returnMode = false } = {}) {
+  const sortingShelves = new Map(), dimLights = [];
   const walnut = woodMaterial("#483326"),
     deskWood = woodMaterial("#62462e"),
     darkWood = material("#262521"),
@@ -27,6 +29,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
   box(scene, [11, 0.18, 10], [0, 3.65, -0.9], material("#292a22"));
   box(scene, [0.2, 3.8, 9.5], [-5.25, 1.8, -0.9], plaster);
   box(scene, [0.2, 3.8, 9.5], [5.25, 1.8, -0.9], plaster);
+  box(scene, [10.5, 3.8, .2], [0, 1.8, 3.95], plaster);
   for (const x of [-4.25, 4.25]) {
     box(scene, [1.95, 3.8, 0.24], [x, 1.8, -4.4], plaster);
     box(scene, [1.96, 0.94, 0.26], [x, 0.48, -4.22], teal);
@@ -55,7 +58,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
   for (const y of [0, 2.81])
     box(door, [1.15, 0.065, 0.1], [0.54, y, 0], walnut);
   box(door, [0.04, 0.43, 0.04], [0.9, 1.18, 0.095], brass);
-  plane(
+  const doorSign = plane(
     door,
     0.36,
     0.2,
@@ -73,10 +76,18 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
   for (const z of [-3.7, -0.5, 2])
     box(scene, [10, 0.14, 0.14], [0, 3.48, z], walnut);
 
-  function shelf(x, z, width = 1.65, height = 2.62) {
+  function shelf(x, z, width = 1.65, height = 2.62, category) {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
     scene.add(group);
+    sortingShelves.set(category.id, group);
+    // A small, fixed shelf lamp lights the spines and labels without lifting the whole room.
+    box(group, [.6, .035, .12], [0, 2.4, .35], trim);
+    box(group, [.48, .008, .09], [0, 2.378, .35], material('#c9b488', {emissive: '#d8b882', emissiveIntensity: .65}));
+    const shelfLight = new THREE.PointLight('#e5cca6', 1.8, 3.5, 2);
+    shelfLight.position.set(0, 2.23, 1.02);
+    group.add(shelfLight);
+    dimLights.push([shelfLight, shelfLight.intensity]);
     box(
       group,
       [width, height, 0.1],
@@ -90,67 +101,24 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
         [s * (width / 2), height / 2, 0.02],
         walnut,
       );
-    for (const y of [0.16, 0.72, 1.29, 1.86, 2.5])
+    for (const y of [0.4, 1.24, 2.08])
       box(group, [width + 0.12, 0.085, 0.53], [0, y, 0.03], walnut);
-    box(group, [width + 0.18, 0.12, 0.57], [0, 2.59, 0.03], walnut);
-    const n = 48,
-      inst = new THREE.InstancedMesh(
-        new THREE.BoxGeometry(1, 1, 1),
-        material("#ffffff"),
-        n,
-      );
-    const matrix = new THREE.Matrix4(),
-      q = new THREE.Quaternion(),
-      v = new THREE.Vector3(),
-      sc = new THREE.Vector3();
-    const colors = [
-      "#596348",
-      "#8c6d49",
-      "#354e50",
-      "#6c4740",
-      "#8d825e",
-      "#3c4148",
-    ];
-    let i = 0;
-    for (const y of [0.215, 0.775, 1.345, 1.915]) {
-      let cursor = -width / 2 + 0.09;
-      for (let k = 0; k < 12; k++) {
-        const w = 0.078 + rng() * 0.04,
-          h = 0.29 + rng() * 0.18;
-        v.set(cursor + w / 2, y + h / 2, 0.03 + rng() * 0.04);
-        sc.set(w, h, 0.25 + rng() * 0.04);
-        q.setFromEuler(new THREE.Euler(0, 0, (rng() - 0.5) * 0.05));
-        matrix.compose(v, q, sc);
-        inst.setMatrixAt(i, matrix);
-        inst.setColorAt(
-          i,
-          new THREE.Color(colors[Math.floor(rng() * colors.length)]),
-        );
-        i++;
-        cursor += w + 0.013;
-      }
-    }
-    inst.castShadow = true;
-    inst.receiveShadow = true;
-    group.add(inst);
+    box(group, [width + 0.18, 0.12, 0.57], [0, 2.13, 0.03], walnut);
     plane(
       group,
-      0.48,
-      0.09,
-      [0, 2.52, 0.308],
-      textTexture(["LITERATURE"], {
+      0.74,
+      0.19,
+      [0, 2.25, 0.308],
+      textTexture(category.label, {
         w: 512,
-        h: 128,
+        h: 192,
         bg: "#302d25",
         ink: "#b6a079",
         size: 40,
       }),
     );
   }
-  shelf(-4, -2.6, 1.72);
-  shelf(4, -2.8, 1.8);
-  shelf(-4.2, 0.7, 1.55);
-  shelf(4.4, 0.4, 1.5);
+  shelfCategories.forEach(c => shelf(c.position[0], c.position[2], 1.65, 2.16, c));
   // Empty reading corner: secondary warmth, not another focal point.
   box(scene, [1.42, 0.085, 0.78], [-2.55, 0.76, -2.45], walnut);
   for (const x of [-3.1, -2])
@@ -194,6 +162,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     const light = new THREE.PointLight("#ffd098", 2.5 * size, 2.5 * size, 2);
     light.position.set(x, y + 0.42 * size, z);
     scene.add(light);
+    if (z < 0) dimLights.push([light, light.intensity]);
     return shade;
   }
   lamp(-2.55, 0.82, -2.48, 0.75);
@@ -560,6 +529,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
       const l = new THREE.PointLight("#f5bd78", 2.2, 4, 2);
       l.position.set(x, 3.22, z);
       scene.add(l);
+      dimLights.push([l, l.intensity]);
     }
   }
   return {
@@ -570,6 +540,19 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     scanLine,
     led,
     mat,
+    sortingShelves,
+    closed: false,
+    setReadingProgress(progress) {
+      dimLights.forEach(([light, intensity]) => light.intensity = intensity * (1 - .05 * progress));
+    },
+    setClosed(amount = 1) {
+      if (!this.closed) {
+        doorSign.material.map.dispose();
+        doorSign.material.map = textTexture(['CLOSED'], {w: 512, h: 256, bg: '#283f37', ink: '#c7b68a', size: 48});
+        this.closed = true;
+      }
+      dimLights.forEach(([light, intensity]) => light.intensity = intensity * (1 - .2 * amount));
+    },
     setReturnMode(enabled) {
       const previous = trayLabel.material.map;
       trayLabel.material.map = textTexture([enabled ? "归 还" : "待 处 理"], {

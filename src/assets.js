@@ -516,7 +516,7 @@ export function findBookDamage(book, raycaster, page) {
 export function makeBook(spec = {}) {
   const damages = spec.damageProfile || [];
   const root = new THREE.Group(),
-    coverMat = material("#233f3d"),
+    coverMat = material(spec.coverColor || "#233f3d"),
     gold = material("#b6a170");
   box(root, [0.416, 0.555, 0.057], [0, 0, 0], material("#c7bda1"));
   for (let i = 0; i < 3; i++)
@@ -535,7 +535,7 @@ export function makeBook(spec = {}) {
   root.add(pivot);
   box(pivot, [0.444, 0.583, 0.014], [0.222, 0, 0], coverMat);
   const cover = canvasTexture(640, 840, (ctx, w, h) => {
-    ctx.fillStyle = "#233f3d";
+    ctx.fillStyle = spec.coverColor || "#233f3d";
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = "#b3a16f";
     ctx.lineWidth = 3;
@@ -545,7 +545,7 @@ export function makeBook(spec = {}) {
     ctx.fillStyle = "#c7b687";
     ctx.textAlign = "center";
     ctx.font = "17px Georgia";
-    ctx.fillText("THE NIGHTFALL COLLECTION", w / 2, 93);
+    ctx.fillText(spec.personal ? "" : "THE NIGHTFALL COLLECTION", w / 2, 93);
     ctx.font = "52px Georgia";
     ctx.fillText(spec.englishTitle?.[0] || "THE MIDNIGHT", w / 2, 205);
     ctx.font = spec.englishTitle ? "52px Georgia" : "70px Georgia";
@@ -584,6 +584,38 @@ export function makeBook(spec = {}) {
         ctx.lineTo(-116 + i * 33, -62);
         ctx.stroke();
       }
+    } else if (['port', 'city', 'plant', 'gear'].includes(spec.art)) {
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (spec.art === 'plant') {
+        ctx.moveTo(0, 120); ctx.lineTo(0, -115);
+        for (let y = -80; y < 90; y += 40) {
+          ctx.moveTo(0, y + 20); ctx.quadraticCurveTo(-90, y - 35, -55, y - 40);
+          ctx.quadraticCurveTo(-10, y - 45, 0, y + 20);
+          ctx.moveTo(0, y); ctx.quadraticCurveTo(90, y - 40, 55, y - 50);
+          ctx.quadraticCurveTo(10, y - 45, 0, y);
+        }
+      } else if (spec.art === 'gear') {
+        for (let i = 0; i < 48; i++) {
+          const a = i * Math.PI / 24, r = i % 4 < 2 ? 96 : 116;
+          const x = Math.cos(a) * r, y = Math.sin(a) * r;
+          if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath(); ctx.moveTo(40, 0); ctx.arc(0, 0, 40, 0, Math.PI * 2);
+        ctx.moveTo(-140, -120); ctx.lineTo(140, -120);
+      } else {
+        for (let i = 0; i < 4; i++) {
+          const x = -120 + i * 65, y = -60 + (i % 2) * 25;
+          ctx.rect(x, y, 50, 130 - y);
+          for (let j = 0; j < 3; j++) ctx.rect(x + 10, y + 15 + j * 30, 12, 16);
+        }
+        ctx.moveTo(-145, 85); ctx.lineTo(145, 85);
+        if (spec.art === 'port') {
+          ctx.moveTo(-140, 105); ctx.lineTo(-100, 125); ctx.lineTo(85, 125); ctx.lineTo(135, 100);
+          ctx.moveTo(-60, 100); ctx.lineTo(-60, -115); ctx.lineTo(130, -85);
+        }
+      }
+      ctx.stroke();
     } else {
       for (const radius of [103, 113, 142]) {
         ctx.beginPath();
@@ -617,14 +649,14 @@ export function makeBook(spec = {}) {
     0.432,
     0.57,
     [0.222, 0, -0.0076],
-    textTexture(["✧", "NIGHTFALL", "COLLECTION"], {
+    textTexture(spec.personal ? ['', '夜航', ''] : ["✧", "NIGHTFALL", "COLLECTION"], {
       bg: "#9b9a7a",
       ink: "#4a604e",
       size: 36,
     }),
     [0, Math.PI, 0],
   );
-  const pages = [0, 1, 2].map((pageIndex) =>
+  const pages = Array.from({length: spec.content?.length || 3}, (_, i) => i).map((pageIndex) =>
     canvasTexture(640, 840, (ctx, w, h) => {
       ctx.fillStyle = "#dfd4b7";
       ctx.fillRect(0, 0, w, h);
@@ -637,6 +669,19 @@ export function makeBook(spec = {}) {
         76,
       );
       ctx.fillRect(57, 98, w - 114, 1);
+      if (spec.content) {
+        ctx.fillStyle = '#414a40';
+        ctx.font = '30px Microsoft YaHei';
+        ctx.fillText(spec.title, w / 2, 175);
+        ctx.textAlign = 'left';
+        ctx.font = '27px Microsoft YaHei';
+        const lines = spec.content[pageIndex].match(/.{1,17}/gu) || [];
+        lines.forEach((line, i) => ctx.fillText(line, 90, 285 + i * 54));
+        ctx.textAlign = 'center';
+        ctx.font = '18px Georgia';
+        ctx.fillText(String(pageIndex + 1), w / 2, 790);
+        return;
+      }
       ctx.font = "38px Georgia";
       ctx.fillText(
         ["A map of quiet places", "Windows after midnight", "The way home"][
@@ -719,6 +764,14 @@ export function makeBook(spec = {}) {
   );
   root.userData.cover = pivot;
   root.userData.front = front;
+  if (spec.content) {
+    const spine = canvasTexture(128, 768, (ctx, w, h) => {
+      ctx.fillStyle = spec.coverColor || '#233f3d'; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = '#d2c5a2'; ctx.font = '64px Microsoft YaHei'; ctx.textAlign = 'center';
+      [...spec.title].forEach((char, i) => ctx.fillText(char, w / 2, 220 + i * 85));
+    });
+    plane(root, .088, .57, [-.235, 0, 0], spine, [0, -Math.PI / 2, 0]);
+  }
   root.userData.cleanPages = [cover, ...pages].map((texture) => {
     const canvas = document.createElement("canvas");
     canvas.width = texture.image.width;
