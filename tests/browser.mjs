@@ -62,6 +62,7 @@ async function play(caseId, decision) {
   }
   await point("customer");
   await page.getByRole("button", { name: "我还有问题", exact: true }).click();
+  await state("ID_HELD");
   assert.equal(await page.evaluate(() => window.library.state), "ID_HELD");
   await page.screenshot({ path: `artifacts/${caseId}-identity.png` });
   await point("customer");

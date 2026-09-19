@@ -26,6 +26,12 @@ let started = false,
   bookOpen = false,
   dragging = false;
 let bookPage = 0;
+let cameraMode = "COUNTER_FREE",
+  cameraBeat = "free",
+  focusBlend = 0;
+let focusYaw = 0,
+  focusPitch = 0,
+  handPitch = 0;
 const heldBookPosition = [0.42, -0.22, -1.05];
 const heldBookRotation = [-0.12, -0.35, 0.08];
 let targetYaw = 0,
@@ -54,7 +60,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color("#152e45");
 scene.fog = new THREE.FogExp2("#142a38", 0.022);
 const camera = new THREE.PerspectiveCamera(
-  65,
+  67,
   innerWidth / innerHeight,
   0.035,
   48,
@@ -166,6 +172,35 @@ function wait(seconds) {
   return tween(seconds, () => {});
 }
 const smooth = (x) => x * x * (3 - 2 * x);
+async function setCameraMode(mode, duration = 0.7) {
+  cameraMode = mode;
+  cameraBeat = mode === "DIALOGUE_FOCUS" ? "face" : "free";
+  if (mode === "DIALOGUE_FOCUS") {
+    const face = person.userData.head.getWorldPosition(new THREE.Vector3());
+    // Aim just below the eyes: keep the face above centre and the rainy room visible.
+    face.y -= 0.12;
+    const dx = face.x - camera.position.x,
+      dz = camera.position.z - face.z;
+    focusYaw = Math.atan2(-dx, dz);
+    focusPitch = Math.atan2(face.y - 1.67, Math.hypot(dx, dz)) + 0.12;
+  }
+  const from = focusBlend,
+    fromHand = handPitch;
+  const to = mode === "DIALOGUE_FOCUS" ? 1 : 0;
+  await tween(duration, (t) => {
+    focusBlend = THREE.MathUtils.lerp(from, to, smooth(t));
+    handPitch = fromHand * (1 - smooth(t));
+  });
+}
+async function shiftAttention(beat, degrees, duration = 0.5) {
+  cameraBeat = beat;
+  const from = handPitch,
+    to = THREE.MathUtils.degToRad(degrees);
+  await tween(
+    duration,
+    (t) => (handPitch = THREE.MathUtils.lerp(from, to, smooth(t))),
+  );
+}
 async function transform(object, parent, position, rotation, duration = 0.32) {
   parent.attach(object);
   const from = object.position.clone(),
@@ -282,36 +317,45 @@ async function start() {
   });
   tx.dispatch("ARRIVE");
   setTask("处理借阅");
+  await setCameraMode("DIALOGUE_FOCUS");
   dialogue("晚上好，我想借这本书。");
   await wait(1.4);
-  await armGesture(0, async () => {
-    book.visible = true;
-    book.position.set(-0.25, 1.18, 0.34);
-    book.rotation.set(-0.9, 0, 0.1);
-    await transform(
-      book,
-      scene,
-      bookHome.toArray(),
-      flat.toArray().slice(0, 3),
-      0.38,
-    );
-    audio.tap();
-  });
-  await wait(0.35);
-  await armGesture(1, async () => {
-    card.visible = true;
-    card.position.set(0.25, 1.2, 0.4);
-    card.rotation.set(-1, 0, -0.1);
-    await transform(
-      card,
-      scene,
-      cardHome.toArray(),
-      flat.toArray().slice(0, 3),
-      0.3,
-    );
-    audio.paper();
-  });
+  await Promise.all([
+    shiftAttention("book", -2),
+    armGesture(0, async () => {
+      book.visible = true;
+      book.position.set(-0.25, 1.18, 0.34);
+      book.rotation.set(-0.9, 0, 0.1);
+      await transform(
+        book,
+        scene,
+        bookHome.toArray(),
+        flat.toArray().slice(0, 3),
+        0.38,
+      );
+      audio.tap();
+    }),
+  ]);
+  await shiftAttention("face", 0, 0.35);
   dialogue("这是我的借阅证。");
+  await Promise.all([
+    shiftAttention("card", -2),
+    armGesture(1, async () => {
+      card.visible = true;
+      card.position.set(0.25, 1.2, 0.4);
+      card.rotation.set(-1, 0, -0.1);
+      await transform(
+        card,
+        scene,
+        cardHome.toArray(),
+        flat.toArray().slice(0, 3),
+        0.3,
+      );
+      audio.paper();
+    }),
+  ]);
+  await wait(0.7);
+  await setCameraMode("COUNTER_FREE", 0.5);
   tx.dispatch("PLACE_ITEMS");
   busy = false;
   updateUI();
@@ -349,6 +393,7 @@ async function exitInspect() {
   updateUI();
   if (bookOpen) await closeCover();
   await transform(book, camera, heldBookPosition, heldBookRotation);
+  cameraMode = "COUNTER_FREE";
   busy = false;
 }
 async function putBack() {
@@ -362,6 +407,7 @@ async function putBack() {
 async function inspectAgain() {
   if (!tx.dispatch("INSPECT_AGAIN")) return;
   busy = true;
+  cameraMode = "OBJECT_INSPECT";
   updateUI();
   audio.paper();
   await transform(book, camera, [0.12, -0.025, -1.35], [0.02, -0.07, 0.015]);
@@ -412,9 +458,20 @@ async function commit(decision) {
     audio.scan();
     env.setScanner(true);
     env.scanLine.visible = false;
-  } else await wait(0.5);
+    cameraBeat = "scan-pause";
+    await wait(0.25);
+  } else {
+    cameraBeat = "reject-pause";
+    dialogue("这样啊……");
+    await wait(0.3);
+  }
   tx.dispatch("RESPOND");
-  dialogue(decision === "borrow" ? "谢谢。晚上辛苦了。" : "这样啊……那算了。");
+  await setCameraMode("DIALOGUE_FOCUS", decision === "borrow" ? 0.7 : 0.8);
+  if (decision === "borrow") {
+    dialogue("谢谢。");
+    await wait(0.65);
+    dialogue("晚上辛苦了。");
+  }
   if (decision === "reject") {
     await tween(0.25, (t) => (person.userData.head.rotation.y = -t * 0.24));
     await wait(0.5);
@@ -422,6 +479,7 @@ async function commit(decision) {
       0.25,
       (t) => (person.userData.head.rotation.y = -(1 - t) * 0.24),
     );
+    dialogue("那算了。");
   }
   await wait(1.1);
   if (!tx.cardReturned)
@@ -434,6 +492,7 @@ async function commit(decision) {
       await transform(book, scene, [-0.25, 1.1, 0.22], [0, 0, 0.06], 0.4);
       person.attach(book);
     });
+  await setCameraMode("COUNTER_FREE", 0.5);
   tx.dispatch("LEAVE");
   updateUI();
   await walkTo([1.85, 0, -3.1], 2.3);
@@ -536,6 +595,9 @@ function guard(promise) {
   promise.catch((error) => {
     console.error(error);
     busy = false;
+    cameraMode =
+      tx.state === "BOOK_INSPECT" ? "OBJECT_INSPECT" : "COUNTER_FREE";
+    focusBlend = handPitch = 0;
     toast("操作遇到问题，请刷新后重试。");
   });
 }
@@ -597,9 +659,12 @@ async function questionCard(field) {
   };
   if (!lines[field]) return;
   busy = true;
+  await setCameraMode("DIALOGUE_FOCUS");
   dialogue(lines[field][0], "你");
   await wait(1.6);
   dialogue(lines[field][1]);
+  await wait(1.4);
+  await setCameraMode("COUNTER_FREE", 0.5);
   busy = false;
 }
 async function returnCard() {
@@ -608,11 +673,16 @@ async function returnCard() {
   $("card-choice").hidden = true;
   updateUI();
   audio.paper();
-  await armGesture(1, async () => {
-    await transform(card, scene, [0.25, 1.2, 0.2], [-0.7, 0, 0], 0.4);
-    card.visible = false;
-  });
+  await Promise.all([
+    setCameraMode("DIALOGUE_FOCUS"),
+    armGesture(1, async () => {
+      await transform(card, scene, [0.25, 1.2, 0.2], [-0.7, 0, 0], 0.4);
+      card.visible = false;
+    }),
+  ]);
   dialogue("谢谢。");
+  await wait(0.65);
+  await setCameraMode("COUNTER_FREE", 0.5);
   busy = false;
 }
 $("card-fields")
@@ -623,10 +693,20 @@ $("card-fields")
     ),
   );
 $("return-card").addEventListener("click", () => guard(returnCard()));
-$("keep-card").addEventListener("click", () => {
-  $("card-choice").hidden = true;
-  dialogue("嗯，你问吧。");
-});
+$("keep-card").addEventListener("click", () =>
+  guard(
+    (async () => {
+      if (busy) return;
+      busy = true;
+      $("card-choice").hidden = true;
+      await setCameraMode("DIALOGUE_FOCUS");
+      dialogue("嗯，你问吧。");
+      await wait(0.8);
+      await setCameraMode("COUNTER_FREE", 0.5);
+      busy = false;
+    })(),
+  ),
+);
 $("settings-open").addEventListener(
   "click",
   () => ($("settings").hidden = false),
@@ -779,6 +859,16 @@ if (DEV_MODE) {
     get cameraAngles() {
       return { yaw: currentYaw, pitch: currentPitch };
     },
+    get cameraShot() {
+      return {
+        mode: cameraMode,
+        beat: cameraBeat,
+        blend: focusBlend,
+        handPitch,
+        fov: camera.fov,
+        z: camera.position.z,
+      };
+    },
     get drawCalls() {
       return renderer.info.render.calls;
     },
@@ -808,13 +898,42 @@ function frame(now) {
     if (!busy) audio.tone(134, 0.12, 0.008);
     nextWood = time + 53;
   }
-  if (!tx.state.endsWith("INSPECT")) {
+  if (cameraMode !== "OBJECT_INSPECT") {
     const follow = 1 - Math.exp(-8 * dt);
-    currentYaw = THREE.MathUtils.lerp(currentYaw, targetYaw, follow);
-    currentPitch = THREE.MathUtils.lerp(currentPitch, targetPitch, follow);
+    const dialogueYaw =
+      focusYaw +
+      THREE.MathUtils.clamp(
+        targetYaw * 0.6,
+        -THREE.MathUtils.degToRad(2.5),
+        THREE.MathUtils.degToRad(2.5),
+      );
+    const dialoguePitch =
+      focusPitch +
+      handPitch +
+      THREE.MathUtils.clamp(
+        targetPitch * 0.6,
+        -THREE.MathUtils.degToRad(2),
+        THREE.MathUtils.degToRad(2),
+      );
+    currentYaw = THREE.MathUtils.lerp(
+      currentYaw,
+      THREE.MathUtils.lerp(targetYaw, dialogueYaw, focusBlend),
+      follow,
+    );
+    currentPitch = THREE.MathUtils.lerp(
+      currentPitch,
+      THREE.MathUtils.lerp(targetPitch, dialoguePitch, focusBlend),
+      follow,
+    );
     camera.rotation.y = currentYaw;
     camera.rotation.x = -0.12 + currentPitch;
   }
+  const fov = 67 - 5 * focusBlend;
+  if (camera.fov !== fov) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  camera.position.z = 2.64 - 0.03 * focusBlend;
   camera.position.y = 1.67 + Math.sin(time * 0.8) * 0.0009;
   if (person.visible) {
     person.userData.body.position.y = Math.sin(time * 1.3) * 0.004;
