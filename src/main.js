@@ -279,8 +279,6 @@ async function start() {
   const oldYaw = person.rotation.y;
   await tween(0.6, (t) => {
     person.rotation.y = oldYaw * (1 - smooth(t));
-    targetYaw *= 1 - t;
-    targetPitch *= 1 - t;
   });
   tx.dispatch("ARRIVE");
   setTask("处理借阅");
@@ -657,7 +655,9 @@ document.querySelectorAll("[data-case]").forEach((button) => {
   });
 });
 window.addEventListener("keydown", (event) => {
-  const key = event.key.toLowerCase();
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  // IMEs may report "Process" as key while preserving the physical key code.
+  const key = event.code === "KeyR" ? "r" : event.key.toLowerCase();
   if (!$("settings").hidden) {
     if (key === "escape") {
       $("settings").hidden = true;
@@ -695,7 +695,7 @@ window.addEventListener("pointermove", (event) => {
       book.rotateY(angularY);
       book.rotateX(angularX);
     }
-  } else if (started && !busy) {
+  } else {
     targetYaw = -pointer.x * MAX_YAW;
     targetPitch = pointer.y * MAX_PITCH;
   }
