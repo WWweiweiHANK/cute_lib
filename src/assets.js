@@ -458,6 +458,24 @@ function drawDamage(ctx, w, h, damages, page) {
       ctx.ellipse(0.5, 0.5, 0.44, 0.37, -0.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+    } else if (damage.type === "corner_fold") {
+      ctx.fillStyle = "#162e2d";
+      ctx.beginPath();
+      ctx.moveTo(1, 0);
+      ctx.lineTo(0, 1);
+      ctx.lineTo(1, 1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#a7a486";
+      ctx.beginPath();
+      ctx.moveTo(0.96, 0.04);
+      ctx.lineTo(0.06, 0.96);
+      ctx.lineTo(0.09, 0.12);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#d4c9a5";
+      ctx.lineWidth = 0.018;
+      ctx.stroke();
     } else if (damage.type === "tear") {
       // A flat paper scar exposes the darker sheet below, without adding meshes.
       ctx.fillStyle = "#ad9f81";
@@ -592,7 +610,6 @@ export function makeBook(spec = {}) {
     ctx.restore();
     ctx.font = "20px Georgia";
     ctx.fillText("E L I A S   W R E N", w / 2, 742);
-    drawDamage(ctx, w, h, damages, 0);
   });
   const front = plane(pivot, 0.438, 0.575, [0.222, 0, 0.0076], cover);
   plane(
@@ -678,7 +695,6 @@ export function makeBook(spec = {}) {
         w / 2,
         795,
       );
-      drawDamage(ctx, w, h, damages, pageIndex + 1);
     }),
   );
   root.userData.pages = pages;
@@ -702,8 +718,32 @@ export function makeBook(spec = {}) {
     [0, Math.PI, 0],
   );
   root.userData.cover = pivot;
+  root.userData.front = front;
+  root.userData.cleanPages = [cover, ...pages].map((texture) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = texture.image.width;
+    canvas.height = texture.image.height;
+    canvas.getContext("2d").drawImage(texture.image, 0, 0);
+    return canvas;
+  });
+  updateBookDamage(root, damages);
+  return root;
+}
+export function updateBookDamage(root, damages) {
+  const front = root.userData.front;
+  [front.material.map, ...root.userData.pages].forEach((texture, page) => {
+    const canvas = texture.image,
+      ctx = canvas.getContext("2d");
+    ctx.drawImage(root.userData.cleanPages[page], 0, 0);
+    drawDamage(ctx, canvas.width, canvas.height, damages, page);
+    texture.needsUpdate = true;
+  });
   root.userData.damageHotspots = damages
-    .filter((d) => d.visible && ["scratch", "stain", "tear"].includes(d.type))
+    .filter(
+      (d) =>
+        d.visible &&
+        ["scratch", "stain", "tear", "corner_fold"].includes(d.type),
+    )
     .map((d) => ({
       damageId: d.id,
       type: d.type,
@@ -712,5 +752,4 @@ export function makeBook(spec = {}) {
       enabled: true,
       surface: d.page === 0 ? front : root.userData.page,
     }));
-  return root;
 }

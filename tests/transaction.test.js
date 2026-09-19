@@ -114,13 +114,18 @@ test("returns record charge, waive and missed damage without blocking acceptance
     }
     assert.equal(t.dispatch(decision), true);
     assert.equal(t.dispatch(decision), false);
+    if (decision !== "ACCEPT") {
+      assert.equal(t.state, "RETURN_BOOK_HELD");
+      assert.equal(t.damageDecisions[0].decision, decision.toLowerCase());
+      t.dispatch("ACCEPT");
+    }
     t.dispatch("RESPOND");
     t.dispatch("LEAVE");
     assert.equal(t.record, null);
     t.dispatch("COMPLETE");
     assert.equal(t.state, "RETURN_COMPLETE");
     assert.equal(t.record.transactionType, "return");
-    assert.equal(t.record.finalDecision, decision.toLowerCase());
+    assert.equal(t.record.finalDecision, "accept");
     assert.equal(t.record.actualDamagePresent, damaged);
     assert.equal(t.record.actualDamageResponsibility, damaged);
     assert.equal(t.record.isCorrect, correct);
@@ -152,6 +157,7 @@ test("old damage remains inspectable but does not justify charging; clean books 
     "BEGIN_DIALOGUE",
     "SHOW_DECISION",
     "CHARGE",
+    "ACCEPT",
     "RESPOND",
     "LEAVE",
     "COMPLETE",
@@ -199,6 +205,7 @@ test("old damage remains inspectable but does not justify charging; clean books 
     "BEGIN_DIALOGUE",
     "SHOW_DECISION",
     "CHARGE",
+    "ACCEPT",
     "RESPOND",
     "LEAVE",
     "COMPLETE",
@@ -210,4 +217,170 @@ test("old damage remains inspectable but does not justify charging; clean books 
     false,
     "charging the old mark is wrong even if another mark is new",
   );
+});
+
+test("memory sequence preserves the copy, loan baseline and per-damage decisions", async () => {
+  const { CustomerSequenceController } = await import("../src/memory-loop.js");
+  for (const [decisions, correct, reason] of [
+    [
+      [
+        ["fold_corner_01", "waive"],
+        ["coffee_stain_01", "charge"],
+      ],
+      true,
+      null,
+    ],
+    [
+      [
+        ["fold_corner_01", "charge"],
+        ["coffee_stain_01", "charge"],
+      ],
+      false,
+      "charged_existing_damage",
+    ],
+    [[["coffee_stain_01", "waive"]], false, "missed_new_damage"],
+    [[], false, "missed_new_damage"],
+  ]) {
+    const sequence = new CustomerSequenceController();
+    const first = sequence.begin();
+    const copy = first.book;
+    assert.equal(copy.instanceId, "book_lighthouse_001");
+    assert.deepEqual(
+      copy.damages.map((d) => d.id),
+      ["fold_corner_01"],
+    );
+    assert.equal(sequence.complete(first.transaction), false);
+    for (const event of [
+      "START",
+      "ARRIVE",
+      "PLACE_ITEMS",
+      "PICK_BOOK",
+      "BORROW",
+      "RESPOND",
+      "LEAVE",
+      "COMPLETE",
+    ])
+      first.transaction.dispatch(event);
+    assert.equal(sequence.complete(first.transaction), true);
+    assert.equal(copy.status, "ON_LOAN");
+    assert.equal(copy.holderCustomerId, "lin_zhou");
+    assert.deepEqual(copy.existingDamageBeforeLoan, ["fold_corner_01"]);
+    const second = sequence.begin();
+    assert.equal(second.step.delayBefore, 5);
+    for (const event of [
+      "START",
+      "ARRIVE",
+      "PLACE_ITEMS",
+      "PICK_BOOK",
+      "BORROW",
+      "RESPOND",
+      "LEAVE",
+      "COMPLETE",
+    ])
+      second.transaction.dispatch(event);
+    sequence.complete(second.transaction);
+    const third = sequence.begin();
+    assert.strictEqual(third.book, copy);
+    assert.equal(third.step.delayBefore, 10);
+    assert.equal(copy.status, "IN_RETURN_TRANSACTION");
+    assert.deepEqual(
+      copy.damages.map((d) => d.id),
+      ["fold_corner_01", "coffee_stain_01"],
+    );
+    assert.strictEqual(sequence.begin(), third, "begin must not mutate twice");
+    const t = third.transaction;
+    for (const event of ["START", "ARRIVE", "PLACE_ITEMS", "PICK_BOOK"])
+      t.dispatch(event);
+    for (const [id, decision] of decisions) {
+      t.dispatch("INSPECT_AGAIN");
+      t.dispatch("SELECT_DAMAGE", id);
+      t.dispatch("BEGIN_DIALOGUE");
+      t.dispatch("SHOW_DECISION");
+      assert.equal(t.dispatch(decision.toUpperCase()), true);
+      assert.equal(t.state, "RETURN_BOOK_HELD");
+      assert.equal(t.record, null);
+    }
+    for (const event of ["ACCEPT", "RESPOND", "LEAVE", "COMPLETE"])
+      t.dispatch(event);
+    assert.equal(t.record.isCorrect, correct);
+    assert.equal(t.record.reason, reason);
+    assert.equal(t.record.bookInstanceId, copy.instanceId);
+    assert.equal(sequence.complete(t), true);
+    assert.equal(copy.status, "IN_LIBRARY");
+    assert.equal(copy.holderCustomerId, null);
+    assert.equal(copy.damages.length, 2);
+    assert.equal(sequence.begin(), null);
+    assert.equal(sequence.complete(t), false);
+    // Replay the first scripted loan against the same session inventory.
+    sequence.index = 0;
+    const later = sequence.begin();
+    assert.strictEqual(later.book, copy);
+    for (const e of [
+      "START",
+      "ARRIVE",
+      "PLACE_ITEMS",
+      "PICK_BOOK",
+      "BORROW",
+      "RESPOND",
+      "LEAVE",
+      "COMPLETE",
+    ])
+      later.transaction.dispatch(e);
+    sequence.complete(later.transaction);
+    assert.deepEqual(copy.existingDamageBeforeLoan, [
+      "fold_corner_01",
+      "coffee_stain_01",
+    ]);
+  }
+});
+
+test("a refused loan cannot create a fictitious return or stain", async () => {
+  const { CustomerSequenceController } = await import("../src/memory-loop.js");
+  const sequence = new CustomerSequenceController();
+  for (const decision of ["REJECT", "BORROW"]) {
+    const { transaction } = sequence.begin();
+    for (const e of [
+      "START",
+      "ARRIVE",
+      "PLACE_ITEMS",
+      "PICK_BOOK",
+      decision,
+      "RESPOND",
+      "LEAVE",
+      "COMPLETE",
+    ])
+      transaction.dispatch(e);
+    sequence.complete(transaction);
+  }
+  assert.equal(sequence.begin(), null);
+  assert.equal(sequence.records.length, 2);
+  const book = sequence.books.get("book_lighthouse_001");
+  assert.equal(book.status, "IN_LIBRARY");
+  assert.equal(book.holderCustomerId, null);
+  assert.deepEqual(
+    book.damages.map((d) => d.id),
+    ["fold_corner_01"],
+  );
+});
+
+test("revisiting a damage replaces its decision and never adds a second charge", () => {
+  const t = new Transaction({
+    type: "return",
+    customerId: "reader",
+    bookId: "book",
+    damageProfile: [{ id: "scratch", visible: true }],
+  });
+  for (const e of ["START", "ARRIVE", "PLACE_ITEMS", "PICK_BOOK"])
+    t.dispatch(e);
+  for (const decision of ["WAIVE", "CHARGE", "CHARGE"]) {
+    t.dispatch("INSPECT_AGAIN");
+    t.dispatch("SELECT_DAMAGE", "scratch");
+    t.dispatch("BEGIN_DIALOGUE");
+    t.dispatch("SHOW_DECISION");
+    t.dispatch(decision);
+  }
+  assert.equal(t.damageDecisions.length, 1);
+  assert.equal(t.damageDecisions[0].decision, "charge");
+  for (const e of ["ACCEPT", "RESPOND", "LEAVE", "COMPLETE"]) t.dispatch(e);
+  assert.equal(t.record.isCorrect, true);
 });

@@ -2,7 +2,7 @@
 
 > 本文记录 2026-09-18 已确认的交互方案。重点是统一玩家的操作语言，减少按键数量，并明确借书、还书、阅读过场与整理书架四类流程。
 
-> 实现进度（2026-09-19）：已实现借书与第 4 节还书核心流程，统一左键拾取到右侧、R 进出检视、拖动旋转、滚轮翻页。证件字段直接提问；还书损坏短按提问，保留姿态和页码。第 4 节按最新要求调整为赔偿/不追究直接完成，或持书点击归还托盘直接收书；不再要求对话后继续检查和扫码。第 5–6 节阅读推进、自由行走整理书架仍是待实现设计。
+> 实现进度（2026-09-20）：借书、还书与三笔跨交易记忆测试已实现。按最新要求，赔偿/不追究仅处理选中损坏，回到持书后可继续检查，主动点击归还托盘才结束交易；此规则也适用于独立还书入口。第 5–6 节阅读推进、自由行走整理书架仍为后续设计。
 
 ## 1. 全局交互原则
 
@@ -248,17 +248,27 @@
 - 要求赔偿
 - 不追究
 
-要求赔偿：玩家说「这属于借阅期间造成的损坏，需要赔偿。」，顾客说「好吧，我明白了。」，播放轻微纸张收据声。不追究：顾客说「谢谢。」。两项都直接完成处理，书放入木质归还托盘；复用原有转身、走向入口、门铃及出门流程，无额外扫码。
+要求赔偿：玩家说「这属于借阅期间造成的损坏，需要赔偿。」，顾客说「好吧，我明白了。」，播放轻微纸张收据声。不追究：顾客说「谢谢。」。只记录这一处损坏的决定，书回到右手 BOOK_HELD；可再次 R 检查其他位置。重复质询同一处更新该处决定，不叠加记录。没有检查进度或未处理损坏提示。
 
 ## 4.5 正常收书与后台判断
 
-未质询时，R 退出检视，点击柜台偏左的归还托盘即可接受；可以不检查直接收书。托盘不自动检测或拒绝损坏书，不显示正确答案。无损坏书没有热点，不能凭空进入索赔。
+无论是否质询，持书点击柜台偏左的归还托盘才代表接受并结束；可以不检查直接收书。托盘不自动检测或拒绝损坏书，不显示正确答案。无损坏书没有热点，不能凭空进入索赔。顾客感谢后复用转身、入口、门铃及离场流程，不需要扫码。
 
-A 索赔记录 charge / 正确；A 不追究记录 waive / 错误；A 直接收书记录 accept / 错误；B 直接收书记录 accept / 正确。对旧损坏索赔也记为错误。判断只留在数据层，普通界面不提示新旧损坏、责任或对错。
+A 对划痕索赔后收书正确，放过或漏查后收书错误；B 直接收书正确。每处决定记录在 damageDecisions，最终操作统一为 accept。最终检查所有当前损坏：旧损坏收费记 charged_existing_damage，新增损坏未收费（包括没点到）记 missed_new_damage。对错和原因只留在数据层，不向正常玩家反馈。
 
-状态由 Transaction 管理：RETURN_BOOK_PLACED → RETURN_BOOK_HELD ↔ RETURN_BOOK_INSPECT → RETURN_DAMAGE_SELECTED → RETURN_DAMAGE_DIALOGUE → RETURN_DECISION → RETURN_CHARGED / RETURN_WAIVED；正常收书进入 RETURN_ACCEPTED。三种决定都复用离场，最终 RETURN_COMPLETE，只保存一次。
+状态由 Transaction 管理：RETURN_BOOK_PLACED → RETURN_BOOK_HELD ↔ RETURN_BOOK_INSPECT → RETURN_DAMAGE_SELECTED → RETURN_DAMAGE_DIALOGUE → RETURN_DECISION → RETURN_BOOK_HELD。主动收书后 RETURN_ACCEPTED → 回应/离场 → RETURN_COMPLETE，只保存一次。
 
-记录包含 transactionType、customerId、bookId、actualDamagePresent、actualDamageResponsibility、selectedDamageId、finalDecision、isCorrect、timestamp。existingDamageBeforeLoan 保存既有损坏 ID，不提供玩家历史对比页面。开发模式可查看诊断；正常模式不暴露 window.library。
+记录包含 transactionType、customerId、bookId、bookInstanceId（记忆模式）、actualDamagePresent、actualDamageResponsibility、selectedDamageId、damageDecisions、finalDecision、isCorrect、reason、errors、timestamp。existingDamageBeforeLoan 保存既有损坏 ID，不提供玩家历史对比页面。开发模式可查看诊断；正常模式不暴露 window.library。
+
+## 4.6 跨交易书况记忆测试（已实现）
+
+入口 `?mode=memory`，或开始页「记忆循环测试」。依序为林舟借《远方的灯塔》→ 安静 5 秒 → 周宁借《城市里的雨》→ 安静 10 秒 → 林舟归还原书。两人借阅证正常，人物沿用同一 Profile；林舟回访复用原模型，不更换头发或衣服。业务间保留环境声和有限转头，不黑屏、不加载、不连续弹提示。
+
+BookDefinition 保存书名及外观，BookInstance 保存副本 ID、损坏、状态与持有人。灯塔书为 book_lighthouse_001，初始封面右下 fold_corner_01；借出保存损坏基线与持有人。归还前脚本加入第三页 coffee_stain_01 一次，原折角保留，重新绘制同一 Mesh 的表面。拒借的副本不会生成虚假的归还。归还完成后状态 IN_LIBRARY、持有人清空，折角和污渍持续存在。当前仅会话持久化，刷新重置测试。
+
+折角质询：「这里为什么折了？」→「这个吗？」→ 停顿 →「我借的时候就已经这样了。」；污渍质询：「这一页上的污渍是怎么回事？」→「啊……」→ 停顿 →「喝东西的时候不小心碰到了。」。这些是角色台词，不增加系统比对。玩家可按任意顺序指出两处，也可漏查或都不查。
+
+正确路线为折角不追究、污渍要求赔偿，最后放入托盘。旧损坏没有被指出也不会自动产生罚款；漏查新增损坏仍算错误。最终判断汇总逐处决定，错误留待未来结算。没有历史、借出截图、OLD/NEW 标签、损坏计数或漏查提醒。DEV 可查看实体、来源、持有人、序列位置和决定；正常界面不可见。
 
 ---
 

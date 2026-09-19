@@ -9,6 +9,7 @@ import {
   makePerson,
   makeCard,
   makeBook,
+  updateBookDamage,
   findBookDamage,
   box,
   material,
@@ -16,14 +17,31 @@ import {
 import { buildEnvironment } from "./environment.js";
 import { Transaction } from "./transaction.js";
 import { returnCases } from "./return-cases.js";
+import { CustomerSequenceController, daySequence } from "./memory-loop.js";
 import { LibraryAudio } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const DEV_MODE = query.get("dev") === "1";
 let selectedCase = query.get("case") === "B" ? "B" : "A";
-const isReturn = query.get("mode") === "return";
+const isMemory = query.get("mode") === "memory";
+const sequence = isMemory ? new CustomerSequenceController() : null;
+let visit = sequence?.begin();
+let isReturn = query.get("mode") === "return";
 const returnCase = returnCases[selectedCase];
+const memoryProfiles = {
+  lin_zhou: {
+    ...profiles.A,
+    id: "lin_zhou",
+    name: "林舟",
+    hairStyle: "short",
+    shirtColor: "#34463c",
+  },
+  zhou_ning: { ...profiles.B, id: "zhou_ning", name: "周宁" },
+};
+let personProfile = isMemory
+  ? memoryProfiles[visit.step.customerId]
+  : profiles[selectedCase];
 let press = null,
   inspectionSnapshot = null,
   selectedHotspot = null;
@@ -122,14 +140,22 @@ const env = buildEnvironment(scene, { returnMode: isReturn });
 const inspectionLight = new THREE.PointLight("#fff0d0", 1.3, 1.65, 2);
 inspectionLight.position.set(-0.25, 0.22, 0.12);
 camera.add(inspectionLight);
-const person = makePerson(profiles[selectedCase]);
+let person = makePerson(personProfile);
 scene.add(person);
 person.position.set(2.9, 0, -4.85);
 person.visible = false;
 // Case B uses a clearly different portrait profile; the two renderers share the same schema.
-const photoProfile = profiles.A;
-const card = makeCard(photoProfile),
-  book = makeBook(isReturn ? returnCase.book : undefined);
+let photoProfile = isMemory ? personProfile : profiles.A;
+let card = makeCard(photoProfile),
+  book = makeBook(
+    isMemory
+      ? { ...visit.definition, damageProfile: visit.book.visualDamages() }
+      : isReturn
+        ? returnCase.book
+        : undefined,
+  );
+const personModels = new Map([[personProfile.id, { person, card }]]);
+const bookModels = new Map(isMemory ? [[visit.book.instanceId, book]] : []);
 scene.add(card, book);
 card.visible = false;
 book.visible = false;
@@ -140,14 +166,18 @@ card.position.copy(cardHome);
 card.rotation.copy(flat);
 book.position.copy(bookHome);
 book.rotation.copy(flat);
-const tx = new Transaction({
-  type: isReturn ? "return" : "borrow",
-  customerId: isReturn ? returnCase.customerId : profiles[selectedCase].id,
-  bookId: isReturn ? returnCase.book.id : "midnight-atlas",
-  damageProfile: isReturn ? returnCase.book.damageProfile : [],
-  existingDamageBeforeLoan: isReturn ? returnCase.existingDamageBeforeLoan : [],
-  actualIdentityMatch: selectedCase === "A",
-});
+let tx =
+  visit?.transaction ||
+  new Transaction({
+    type: isReturn ? "return" : "borrow",
+    customerId: isReturn ? returnCase.customerId : profiles[selectedCase].id,
+    bookId: isReturn ? returnCase.book.id : "midnight-atlas",
+    damageProfile: isReturn ? returnCase.book.damageProfile : [],
+    existingDamageBeforeLoan: isReturn
+      ? returnCase.existingDamageBeforeLoan
+      : [],
+    actualIdentityMatch: selectedCase === "A",
+  });
 
 const proxyMaterial = new THREE.MeshBasicMaterial({
   transparent: true,
@@ -178,6 +208,49 @@ const cardFields = {
   date: [350 / 1024, 355 / 640, 610 / 1024, 90 / 640],
 };
 const raycaster = new THREE.Raycaster();
+
+function prepareVisit(next) {
+  person.removeFromParent();
+  card.removeFromParent();
+  book.removeFromParent();
+  person.visible = card.visible = book.visible = false;
+  visit = next;
+  tx = next.transaction;
+  isReturn = tx.type === "return";
+  personProfile = memoryProfiles[next.step.customerId];
+  photoProfile = personProfile;
+  if (!personModels.has(personProfile.id))
+    personModels.set(personProfile.id, {
+      person: makePerson(personProfile),
+      card: makeCard(photoProfile),
+    });
+  ({ person, card } = personModels.get(personProfile.id));
+  if (!bookModels.has(next.book.instanceId))
+    bookModels.set(next.book.instanceId, makeBook(next.definition));
+  book = bookModels.get(next.book.instanceId);
+  updateBookDamage(book, next.book.visualDamages());
+  scene.add(person, card, book);
+  person.visible = card.visible = book.visible = false;
+  person.position.set(2.9, 0, -4.85);
+  person.rotation.set(0, 0, 0);
+  card.position.copy(cardHome);
+  card.rotation.copy(flat);
+  book.position.copy(bookHome);
+  book.rotation.copy(flat);
+  book.userData.cover.rotation.y = 0;
+  bookPage = 0;
+  bookOpen = dragging = recordSaved = false;
+  press = inspectionSnapshot = selectedHotspot = hover = null;
+  angularX = angularY = 0;
+  inspectionLight.position.set(-0.25, 0.22, 0.12);
+  targets.reject.userData.name = isReturn ? "return" : "reject";
+  env.setReturnMode(isReturn);
+  env.setScanner(false);
+  $("complete").querySelector("p").textContent = isReturn
+    ? "本次还书处理已记录"
+    : "本次借阅处理已记录";
+  updateUI();
+}
 
 function tween(duration, update) {
   return new Promise((resolve) => {
@@ -321,6 +394,10 @@ async function start() {
   setTimeout(() => ($("opening").hidden = true), 2000);
   $("reticle").hidden = false;
   await wait(1.3);
+  await arriveVisit();
+}
+async function arriveVisit() {
+  busy = true;
   tx.dispatch("START");
   audio.bell();
   person.visible = true;
@@ -335,7 +412,10 @@ async function start() {
   tx.dispatch("ARRIVE");
   setTask(isReturn ? "处理还书" : "处理借阅");
   await setCameraMode("DIALOGUE_FOCUS");
-  dialogue(isReturn ? "你好，我来还书。" : "晚上好，我想借这本书。");
+  dialogue(
+    visit?.step.greeting ||
+      (isReturn ? "你好，我来还书。" : "晚上好，我想借这本书。"),
+  );
   await wait(1.4);
   await Promise.all([
     shiftAttention("book", -2),
@@ -528,8 +608,22 @@ async function finishVisit() {
   await tween(0.6, (t) => (env.door.rotation.y = -(1 - smooth(t)) * 0.95));
   tx.dispatch("COMPLETE");
   saveRecord();
-  busy = false;
   updateUI();
+  $("dialogue").hidden = true;
+  if (sequence) {
+    sequence.complete(tx);
+    const nextStep = daySequence[sequence.index];
+    if (nextStep) {
+      await wait(nextStep.delayBefore);
+      const next = sequence.begin();
+      if (next) {
+        prepareVisit(next);
+        await arriveVisit();
+        return;
+      }
+    }
+  }
+  busy = false;
   $("complete").hidden = false;
   setTimeout(() => ($("complete").hidden = true), 3000);
   $("dialogue").hidden = true;
@@ -589,15 +683,17 @@ async function selectDamage(hotspot) {
       scratch: "这里的封面为什么有一道划痕？",
       stain: "这一页上的污渍是怎么回事？",
       tear: "这一页怎么破了？",
+      corner_fold: "这里为什么折了？",
     }[hotspot.type],
     "你",
   );
   await wait(1.6);
-  dialogue("啊……这个。");
+  const reply = visit?.step.damageReplies?.[hotspot.damageId];
+  dialogue(reply?.[0] || "啊……这个。");
   await wait(0.5);
-  dialogue("可能是不小心碰到哪里了。");
+  dialogue(reply?.[1] || "可能是不小心碰到哪里了。");
   await wait(1.5);
-  dialogue("抱歉。");
+  if (!reply) dialogue("抱歉。");
   await wait(0.5);
   tx.dispatch("SHOW_DECISION");
   busy = false;
@@ -646,6 +742,16 @@ async function commitReturn(decision) {
     dialogue("好吧，我明白了。");
     audio.paper(0.035);
   } else if (decision === "waive") dialogue("谢谢。");
+  if (decision !== "accept") {
+    await wait(1.1);
+    if (bookOpen) await closeCover();
+    await transform(book, camera, heldBookPosition, heldBookRotation);
+    inspectionLight.position.set(-0.25, 0.22, 0.12);
+    await setCameraMode("COUNTER_FREE", 0.5);
+    busy = false;
+    updateUI();
+    return;
+  }
   if (bookOpen) await closeCover();
   await transform(
     book,
@@ -885,13 +991,17 @@ $("ambience-volume").addEventListener("input", (event) =>
 );
 $("again").addEventListener("click", () => location.reload());
 $("case-label").textContent = isReturn ? "练习还书访客" : "练习借书访客";
+$("case-label").parentElement.hidden = isMemory;
 $("complete").querySelector("p").textContent = isReturn
   ? "本次还书处理已记录"
   : "本次借阅处理已记录";
 document.querySelectorAll("[data-mode]").forEach((button) => {
   button.setAttribute(
     "aria-pressed",
-    String(button.dataset.mode === (isReturn ? "return" : "borrow")),
+    String(
+      button.dataset.mode ===
+        (isMemory ? "memory" : isReturn ? "return" : "borrow"),
+    ),
   );
   button.addEventListener("click", () => {
     query.set("mode", button.dataset.mode);
@@ -1081,6 +1191,22 @@ if (DEV_MODE) {
     get bookQuaternion() {
       return book.quaternion.toArray();
     },
+    get damageDecisions() {
+      return structuredClone(tx.damageDecisions);
+    },
+    get memory() {
+      if (!sequence) return null;
+      return structuredClone({
+        index: sequence.index,
+        completed: sequence.records.length,
+        book: visit.book,
+        books: [...sequence.books.values()],
+        profile: personProfile,
+        photoProfile,
+        meshId: book.uuid,
+        personId: person.uuid,
+      });
+    },
     get selectedDamageVisible() {
       return damageInView(selectedHotspot, selectedMinFacing);
     },
@@ -1230,6 +1356,9 @@ function frame(now) {
       (isReturn
         ? `损坏: ${tx.record?.actualDamagePresent ?? "—"}\n责任: ${tx.record?.actualDamageResponsibility ?? "—"}`
         : `身份: ${tx.actualIdentityMatch ? "MATCH" : "MISMATCH"}\n勾选: ${tx.checklist ?? "NULL"}`) +
-      `\n操作: ${tx.decision ?? "—"}\n正确: ${tx.record?.isCorrect ?? "—"}`;
+      `\n操作: ${tx.decision ?? "—"}\n正确: ${tx.record?.isCorrect ?? "—"}` +
+      (sequence
+        ? `\n交易: ${daySequence.indexOf(visit.step) + 1} / 3\n副本: ${visit.book.instanceId}\n持有人: ${visit.book.holderCustomerId ?? "—"}\n损坏: ${visit.book.damages.map((d) => d.id + ":" + d.createdAt).join(", ")}\n决定: ${JSON.stringify(tx.damageDecisions)}`
+        : "");
 }
 requestAnimationFrame(frame);

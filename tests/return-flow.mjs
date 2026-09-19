@@ -121,6 +121,13 @@ try {
       );
       await page.keyboard.press("Escape");
       await page.locator(`[data-decision="${decision}"]`).click();
+      await state("RETURN_BOOK_HELD");
+      assert.equal(await page.evaluate(() => window.library.record), null);
+      assert.equal(
+        await page.evaluate(() => window.library.damageDecisions[0].decision),
+        decision,
+      );
+      await target("return");
     } else {
       if (customer === "B") {
         assert.equal(
@@ -145,7 +152,7 @@ try {
     );
     assert.equal(records.length, 1);
     assert.equal(records[0].transactionType, "return");
-    assert.equal(records[0].finalDecision, decision);
+    assert.equal(records[0].finalDecision, "accept");
     assert.equal(records[0].isCorrect, correct);
     await page.waitForTimeout(200);
     assert.equal(

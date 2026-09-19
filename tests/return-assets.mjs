@@ -13,11 +13,12 @@ const base = "http://127.0.0.1:5178";
 try {
   await page.goto(base);
   const checks = await page.evaluate(async () => {
-    const { makeBook, findBookDamage } = await import("/src/assets.js");
+    const { makeBook, findBookDamage, updateBookDamage } =
+      await import("/src/assets.js");
     const THREE = await import("/node_modules/three/build/three.module.js");
     const checks = [];
-    for (const type of ["scratch", "stain", "tear"]) {
-      const page = type === "scratch" ? 0 : 1;
+    for (const type of ["scratch", "stain", "tear", "corner_fold"]) {
+      const page = ["scratch", "corner_fold"].includes(type) ? 0 : 1;
       const clean = makeBook();
       const damaged = makeBook({
         damageProfile: [
@@ -43,6 +44,10 @@ try {
       ];
       const a = pixels(source),
         b = pixels(actual);
+      updateBookDamage(damaged, [
+        { id: type, type, visible: true, page, uvRect: [0.65, 0.71, 0.2, 0.1] },
+      ]);
+      const redrawn = pixels(actual);
       if (page) damaged.userData.cover.rotation.y = -Math.PI * 0.94;
       damaged.updateMatrixWorld(true);
       const size = hotspot.surface.geometry.parameters;
@@ -56,6 +61,7 @@ try {
       checks.push({
         type,
         painted: a.some((v, i) => v !== b[i]),
+        stable: b.every((v, i) => v === redrawn[i]),
         hit: findBookDamage(damaged, ray, page)?.damageId,
         otherPage: findBookDamage(damaged, ray, page + 1),
       });
@@ -69,6 +75,11 @@ try {
     if ("back" in check) assert.equal(check.back, true);
     else {
       assert.equal(check.painted, true);
+      assert.equal(
+        check.stable,
+        true,
+        "texture redraw must not accumulate damage",
+      );
       assert.equal(check.hit, check.type);
       assert.equal(check.otherPage, null);
     }
@@ -159,7 +170,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: three damage textures, surface occlusion, active-page hits",
+    "PASS: four damage textures, stable redraw, surface occlusion, active-page hits",
   );
 } finally {
   await browser.close();

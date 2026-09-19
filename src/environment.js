@@ -244,7 +244,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     box(reject, [0.035, 0.13, 0.65], [x, 0.073, 0], walnut);
   box(reject, [0.69, 0.13, 0.035], [0, 0.073, -0.305], walnut);
   box(reject, [0.69, 0.09, 0.035], [0, 0.052, 0.305], walnut);
-  plane(
+  const trayLabel = plane(
     reject,
     0.35,
     0.063,
@@ -570,6 +570,17 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     scanLine,
     led,
     mat,
+    setReturnMode(enabled) {
+      const previous = trayLabel.material.map;
+      trayLabel.material.map = textTexture([enabled ? "归 还" : "待 处 理"], {
+        w: 512,
+        h: 128,
+        bg: "#b9ad89",
+        ink: "#3b4438",
+        size: 48,
+      });
+      previous.dispose();
+    },
     update(dt, time) {
       for (let i = 0; i < rainCount; i++) {
         const k = i * 6,

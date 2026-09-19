@@ -34,10 +34,8 @@ const returnTransitions = {
   },
   RETURN_DAMAGE_SELECTED: { BEGIN_DIALOGUE: "RETURN_DAMAGE_DIALOGUE" },
   RETURN_DAMAGE_DIALOGUE: { SHOW_DECISION: "RETURN_DECISION" },
-  RETURN_DECISION: { CHARGE: "RETURN_CHARGED", WAIVE: "RETURN_WAIVED" },
+  RETURN_DECISION: { CHARGE: "RETURN_BOOK_HELD", WAIVE: "RETURN_BOOK_HELD" },
   RETURN_ACCEPTED: { RESPOND: "RETURN_CUSTOMER_RESPONSE" },
-  RETURN_CHARGED: { RESPOND: "RETURN_CUSTOMER_RESPONSE" },
-  RETURN_WAIVED: { RESPOND: "RETURN_CUSTOMER_RESPONSE" },
   RETURN_CUSTOMER_RESPONSE: { LEAVE: "RETURN_CUSTOMER_LEAVING" },
   RETURN_CUSTOMER_LEAVING: { COMPLETE: "RETURN_COMPLETE" },
   RETURN_COMPLETE: {},
@@ -50,11 +48,14 @@ export class Transaction {
     customerId,
     actualIdentityMatch,
     bookId,
+    bookInstanceId,
     damageProfile = [],
     existingDamageBeforeLoan = [],
   }) {
     this.type = type;
     this.bookId = bookId;
+    this.bookInstanceId = bookInstanceId;
+    this.damageDecisions = [];
     this.damageProfile = damageProfile;
     this.existingDamageBeforeLoan = existingDamageBeforeLoan;
     this.selectedDamageId = null;
@@ -86,7 +87,32 @@ export class Transaction {
     }
     this.state = next;
     if (event === "RETURN_ID") this.cardReturned = true;
-    if (["BORROW", "REJECT", "ACCEPT", "CHARGE", "WAIVE"].includes(event))
+    if (["CHARGE", "WAIVE"].includes(event)) {
+      const damage = this.damageProfile.find(
+        (d) => d.id === this.selectedDamageId,
+      );
+      const responsible =
+        damage.causedDuringLoan ??
+        !this.existingDamageBeforeLoan.includes(damage.id);
+      const decision = event.toLowerCase();
+      const isCorrect = (decision === "charge") === responsible;
+      const item = {
+        damageId: damage.id,
+        decision,
+        isCorrect,
+        reason: isCorrect
+          ? null
+          : responsible
+            ? "missed_new_damage"
+            : "charged_existing_damage",
+      };
+      const previous = this.damageDecisions.findIndex(
+        (d) => d.damageId === damage.id,
+      );
+      if (previous < 0) this.damageDecisions.push(item);
+      else this.damageDecisions[previous] = item;
+    }
+    if (["BORROW", "REJECT", "ACCEPT"].includes(event))
       this.decision = event.toLowerCase();
     if (event === "COMPLETE") {
       if (this.type === "return") {
@@ -95,29 +121,44 @@ export class Transaction {
           (d) =>
             d.causedDuringLoan ?? !this.existingDamageBeforeLoan.includes(d.id),
         );
-        const selected = present.find((d) => d.id === this.selectedDamageId);
-        const selectedResponsible =
-          selected &&
-          (selected.causedDuringLoan ??
-            !this.existingDamageBeforeLoan.includes(selected.id));
+        const errors = present.flatMap((d) => {
+          const liable =
+            d.causedDuringLoan ?? !this.existingDamageBeforeLoan.includes(d.id);
+          const charged =
+            this.damageDecisions.find((item) => item.damageId === d.id)
+              ?.decision === "charge";
+          return liable === charged
+            ? []
+            : [
+                {
+                  damageId: d.id,
+                  reason: liable
+                    ? "missed_new_damage"
+                    : "charged_existing_damage",
+                },
+              ];
+        });
         this.record = Object.freeze({
           transactionType: "return",
           customerId: this.customerId,
           bookId: this.bookId,
+          bookInstanceId: this.bookInstanceId,
           actualDamagePresent: present.length > 0,
           actualDamageResponsibility: responsible,
           selectedDamageId: this.selectedDamageId,
           finalDecision: this.decision,
-          isCorrect:
-            this.decision === "charge"
-              ? Boolean(selectedResponsible)
-              : !responsible,
+          damageDecisions: structuredClone(this.damageDecisions),
+          isCorrect: errors.length === 0,
+          reason: errors[0]?.reason ?? null,
+          errors,
           timestamp: new Date().toISOString(),
         });
       } else
         this.record = Object.freeze({
           transactionType: "borrow",
           customerId: this.customerId,
+          bookId: this.bookId,
+          bookInstanceId: this.bookInstanceId,
           actualIdentityMatch: this.actualIdentityMatch,
           playerChecklistIdentity: this.checklist,
           finalDecision: this.decision,
