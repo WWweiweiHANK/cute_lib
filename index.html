@@ -47,24 +47,25 @@
       <h2 id="task-title">处理借阅</h2>
     </section>
     <div id="opening" hidden>DAY 01<span>21:47</span></div>
-    <aside id="checklist" hidden>
-      <span class="paper-clip"></span>
-      <p class="paper-kicker">NIGHTFALL PUBLIC LIBRARY</p>
-      <h3>借阅核验单</h3>
-      <p class="paper-sub">请对照证件照片与面前的访客</p>
-      <div class="check-row">
-        <span>照片与本人一致</span>
-        <div>
-          <button id="pass" aria-label="照片一致" aria-pressed="false">✓</button
-          ><button id="fail" aria-label="照片不一致" aria-pressed="false">
-            ×
-          </button>
-        </div>
-      </div>
-      <p class="paper-foot">按你的观察记录 · 再次点击可取消</p>
-    </aside>
+    <div id="card-fields" hidden>
+      <button
+        data-field="photo"
+        aria-label="询问照片"
+        title="询问照片"
+      ></button>
+      <button data-field="name" aria-label="询问姓名" title="询问姓名"></button>
+      <button
+        data-field="date"
+        aria-label="询问有效日期"
+        title="询问有效日期"
+      ></button>
+    </div>
+    <div id="card-choice" hidden role="group" aria-label="递还证件">
+      <button id="return-card">还给你</button>
+      <button id="keep-card">我还有问题</button>
+    </div>
     <div id="reticle" hidden aria-hidden="true"></div>
-    <div id="interact" hidden><kbd>E</kbd><span></span></div>
+    <div id="interact" hidden><kbd>左键</kbd><span></span></div>
     <div id="inspect-help" hidden></div>
     <section id="dialogue" hidden aria-live="polite">
       <span class="speaker">访客</span>
@@ -91,9 +92,10 @@
         <button id="sound" aria-label="切换环境声音">声音 · 开</button>
       </div>
       <p>
-        指向物件，按 E 拿起或放置。<br />检查时按 E 放回桌面，Esc
-        结束检查并手持。<br />拖动旋转书籍，F 翻开；R 再次检查手持物。<br />平时按
-        Esc 打开此页。
+        左键点击物件，拿到右手；点击目标位置使用或放置。<br />
+        R 进入 / 退出书籍检视，按住左键拖动旋转，滚轮翻页。<br />
+        点击证件照片、姓名或日期直接提问；点击顾客递还证件。<br />
+        Esc 打开 / 关闭此页。
       </p>
       <button id="settings-close" class="text-button">返回柜台</button>
       <button id="again" class="text-button">重新值班</button>

@@ -419,7 +419,7 @@ export function makeCard(profile) {
     ctx.lineTo(963, 334);
     ctx.stroke();
     ctx.font = "23px Microsoft YaHei";
-    ctx.font = "18px Georgia";
+    ctx.fillText("有效至 2027.09.30", 362, 408);
     const r = seeded(93);
     for (let x = 365; x < 934; x += 7) {
       const width = r() > 0.5 ? 4 : 2;
@@ -513,52 +513,77 @@ export function makeBook() {
     }),
     [0, Math.PI, 0],
   );
-  const page = canvasTexture(640, 840, (ctx, w, h) => {
-    ctx.fillStyle = "#dfd4b7";
-    ctx.fillRect(0, 0, w, h);
-    ctx.fillStyle = "#526052";
-    ctx.textAlign = "center";
-    ctx.font = "18px Georgia";
-    ctx.fillText("THE MIDNIGHT ATLAS", w / 2, 76);
-    ctx.fillRect(57, 98, w - 114, 1);
-    ctx.font = "38px Georgia";
-    ctx.fillText("A map of quiet places", w / 2, 161);
-    ctx.font = "23px Microsoft YaHei";
-    ctx.fillText("安 静 之 地 的 地 图", w / 2, 211);
-    ctx.strokeStyle = "#6a7964";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(320, 390, 122, 0, Math.PI * 2);
-    ctx.stroke();
-    const stars = [
-      [250, 302],
-      [295, 340],
-      [390, 325],
-      [370, 425],
-      [290, 467],
-      [238, 417],
-      [250, 302],
-    ];
-    ctx.beginPath();
-    stars.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    ctx.stroke();
-    stars.forEach(([x, y]) => {
+  const pages = [0, 1, 2].map((pageIndex) =>
+    canvasTexture(640, 840, (ctx, w, h) => {
+      ctx.fillStyle = "#dfd4b7";
+      ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#526052";
+      ctx.textAlign = "center";
+      ctx.font = "18px Georgia";
+      ctx.fillText("THE MIDNIGHT ATLAS", w / 2, 76);
+      ctx.fillRect(57, 98, w - 114, 1);
+      ctx.font = "38px Georgia";
+      ctx.fillText(
+        ["A map of quiet places", "Windows after midnight", "The way home"][
+          pageIndex
+        ],
+        w / 2,
+        161,
+      );
+      ctx.font = "23px Microsoft YaHei";
+      ctx.fillText(
+        ["安 静 之 地 的 地 图", "午 夜 之 后 的 窗", "回 家 的 路"][pageIndex],
+        w / 2,
+        211,
+      );
+      ctx.strokeStyle = "#6a7964";
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(x, y, 4, 0, Math.PI * 2);
-      ctx.fill();
-    });
-    ctx.font = "21px Georgia";
-    [
-      "Some places can only be found",
-      "after the last light has gone out.",
-      "Follow the rain. Remember the way home.",
-    ].forEach((t, i) => ctx.fillText(t, w / 2, 601 + i * 36));
-    ctx.font = "18px Microsoft YaHei";
-    ctx.fillText("沿着雨声，记住回家的路。", w / 2, 733);
-    ctx.font = "18px Georgia";
-    ctx.fillText("—  07  —", w / 2, 795);
-  });
-  plane(root, 0.407, 0.545, [0, 0, 0.0305], page);
+      ctx.arc(320, 390, 122, 0, Math.PI * 2);
+      ctx.stroke();
+      const stars = [
+        [250, 302],
+        [295, 340],
+        [390, 325],
+        [370, 425],
+        [290, 467],
+        [238, 417],
+        [250, 302],
+      ];
+      ctx.beginPath();
+      stars.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+      stars.forEach(([x, y]) => {
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.font = "21px Georgia";
+      [
+        "Some places can only be found",
+        "after the last light has gone out.",
+        "Follow the rain. Remember the way home.",
+      ].forEach((t, i) => ctx.fillText(t, w / 2, 601 + i * 36));
+      ctx.font = "18px Microsoft YaHei";
+      ctx.fillText(
+        [
+          "沿着雨声，记住回家的路。",
+          "每一扇亮着的窗，都有人在等待。",
+          "灯光熄灭以前，沿原路返回。",
+        ][pageIndex],
+        w / 2,
+        733,
+      );
+      ctx.font = "18px Georgia";
+      ctx.fillText(
+        `—  ${String(7 + pageIndex).padStart(2, "0")}  —`,
+        w / 2,
+        795,
+      );
+    }),
+  );
+  root.userData.pages = pages;
+  root.userData.page = plane(root, 0.407, 0.545, [0, 0, 0.0305], pages[0]);
   plane(
     root,
     0.438,

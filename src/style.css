@@ -282,90 +282,6 @@ h1 em {
 .steps span.active {
   background: #d6bd84;
 }
-#checklist {
-  position: absolute;
-  right: 4%;
-  top: 27%;
-  width: 282px;
-  background: #d6c9aa;
-  color: #393b30;
-  padding: 30px 23px 23px;
-  box-shadow: 0 8px 25px #0006;
-  transform: rotate(1deg);
-  z-index: 5;
-  background-image: repeating-linear-gradient(
-    0deg,
-    #806c3805 0px,
-    #806c3805 1px,
-    transparent 1px,
-    transparent 4px
-  );
-}
-.paper-clip {
-  position: absolute;
-  top: -9px;
-  left: 105px;
-  width: 70px;
-  height: 21px;
-  border: 2px solid #464b41;
-  border-radius: 3px;
-  background: linear-gradient(#969882, #626553);
-}
-.paper-kicker {
-  font: 7px monospace;
-  letter-spacing: 1.7px;
-  color: #7d795f;
-  text-align: center;
-  margin: 0 0 16px;
-}
-#checklist h3 {
-  font-size: 20px;
-  font-weight: 400;
-  letter-spacing: 3px;
-  margin: 0 0 12px;
-  text-align: center;
-}
-.paper-sub {
-  font-size: 10px;
-  text-align: center;
-  color: #6e705e;
-}
-.check-row {
-  border-top: 1px solid #777d6266;
-  border-bottom: 1px solid #777d6244;
-  margin-top: 25px;
-  padding: 17px 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-}
-.check-row > div {
-  display: flex;
-  gap: 6px;
-}
-.check-row button {
-  border: 1px solid #74796077;
-  background: transparent;
-  color: #505843;
-  font-size: 19px;
-  width: 29px;
-  height: 29px;
-}
-.check-row button[aria-pressed="true"] {
-  background: #535c49;
-  color: #ece4c9;
-}
-.paper-foot {
-  font-size: 9px;
-  color: #7e7d69;
-  margin: 17px 0 27px;
-}
-.paper-number {
-  font: 7px monospace;
-  letter-spacing: 1.5px;
-  color: #797d6c;
-}
 #reticle {
   position: absolute;
   width: 5px;
@@ -375,6 +291,33 @@ h1 em {
   z-index: 3;
   pointer-events: none;
   transform: translate(-50%, -50%);
+}
+#card-fields button {
+  position: absolute;
+  z-index: 4;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+}
+#card-fields button:hover,
+#card-fields button:focus-visible {
+  border-color: #695c39;
+  background: #c6b58518;
+}
+#card-choice {
+  position: absolute;
+  left: 50%;
+  bottom: 140px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  z-index: 6;
+}
+#card-choice button {
+  color: var(--cream);
+  background: #151d1cf2;
+  border: 1px solid #ad966f66;
+  padding: 12px 22px;
 }
 #reticle.hot {
   width: 12px;
@@ -590,15 +533,6 @@ footer {
   #task h2 {
     font-size: 16px;
   }
-  #checklist {
-    width: 238px;
-    right: 20px;
-    top: 29%;
-    padding: 25px 17px;
-  }
-  .paper-clip {
-    left: 84px;
-  }
   footer {
     left: 22px;
     right: 22px;
@@ -631,9 +565,6 @@ footer {
   }
   #task {
     top: 100px;
-  }
-  #checklist {
-    top: 23%;
   }
 }
 #opening {

@@ -31,9 +31,9 @@ try {
   await page.waitForTimeout(400);
   const target = await page.evaluate(() => window.library.project("card"));
   await page.mouse.move(target.x, target.y);
-  await page.keyboard.press("e");
+  await page.mouse.click(target.x, target.y);
   await page.waitForFunction(
-    () => window.library.state === "ID_INSPECT" && !window.library.busy,
+    () => window.library.state === "ID_HELD" && !window.library.busy,
   );
   assert.equal(await page.locator("#inspect-help").isVisible(), true);
   await page.waitForTimeout(6000);
@@ -42,17 +42,14 @@ try {
     false,
     "first-use help fades",
   );
-  await page.keyboard.press("e");
-  await page.waitForFunction(
-    () => window.library.state === "ITEMS_PLACED" && !window.library.busy,
-  );
   await page.keyboard.press("Escape");
   assert.equal(await page.locator("#settings").isVisible(), true);
   assert.equal(await page.getByLabel("环境音量").isVisible(), true);
   await page.getByRole("button", { name: "返回柜台" }).click();
   assert.equal(await page.locator("#settings").isVisible(), false);
+  assert.equal(await page.evaluate(() => window.library.state), "ID_HELD");
   console.log(
-    "PASS: quiet persistent UI, timed prompts, E places inspected ID, on-demand sound settings.",
+    "PASS: quiet persistent UI, timed prompts, click holds ID, settings preserve held state.",
   );
 } finally {
   await browser.close();

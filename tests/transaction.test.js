@@ -12,38 +12,31 @@ function ready(match = true) {
 }
 function inspected(match = true) {
   const t = ready(match);
-  for (const event of [
-    "PICK_ID",
-    "EXIT_INSPECT",
-    "PUT_ID",
-    "PICK_BOOK",
-    "EXIT_INSPECT",
-  ])
-    t.dispatch(event);
+  for (const event of ["PICK_ID", "RETURN_ID", "PICK_BOOK"]) t.dispatch(event);
   return t;
 }
 
-test("identity checklist begins empty and only the player can toggle it", () => {
+test("card is readable in hand and returning it ends the card stage", () => {
   const t = ready();
-  assert.equal(t.checklist, null);
-  assert.equal(t.dispatch("CHECK_PASS"), false);
   t.dispatch("PICK_ID");
-  t.dispatch("CHECK_PASS");
-  assert.equal(t.checklist, "PASS");
-  t.dispatch("CHECK_PASS");
-  assert.equal(t.checklist, null);
-  t.dispatch("CHECK_FAIL");
-  t.dispatch("CHECK_PASS");
-  assert.equal(t.checklist, "PASS");
+  assert.equal(t.state, "ID_HELD");
+  assert.equal(t.dispatch("INSPECT_AGAIN"), false);
+  assert.equal(t.dispatch("PUT_ID"), false);
+  assert.equal(t.dispatch("RETURN_ID"), true);
+  assert.equal(t.cardReturned, true);
+  assert.equal(t.dispatch("PICK_ID"), false);
 });
 test("exiting inspection retains the held object and permits placing it", () => {
   const t = ready();
   t.dispatch("PICK_ID");
-  t.dispatch("EXIT_INSPECT");
   assert.equal(t.state, "ID_HELD");
   assert.equal(t.dispatch("PICK_BOOK"), false);
-  t.dispatch("PUT_ID");
+  t.dispatch("RETURN_ID");
   t.dispatch("PICK_BOOK");
+  assert.equal(t.state, "BOOK_HELD");
+  t.dispatch("INSPECT_AGAIN");
+  assert.equal(t.state, "BOOK_INSPECT");
+  assert.equal(t.dispatch("BORROW"), false);
   t.dispatch("EXIT_INSPECT");
   assert.equal(t.state, "BOOK_HELD");
   assert.equal(t.dispatch("BORROW"), true);
@@ -89,5 +82,6 @@ test("book can be returned and inspected again without committing", () => {
   assert.equal(t.dispatch("REJECT"), false);
   t.dispatch("EXIT_INSPECT");
   assert.equal(t.dispatch("PUT_BOOK"), true);
-  assert.equal(t.dispatch("PICK_ID"), true);
+  assert.equal(t.dispatch("PICK_BOOK"), true);
+  assert.equal(t.state, "BOOK_HELD");
 });

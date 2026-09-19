@@ -25,6 +25,9 @@ let started = false,
   hover = null,
   bookOpen = false,
   dragging = false;
+let bookPage = 0;
+const heldBookPosition = [0.42, -0.22, -1.05];
+const heldBookRotation = [-0.12, -0.35, 0.08];
 let targetYaw = 0,
   targetPitch = 0,
   currentYaw = 0,
@@ -141,22 +144,17 @@ function target(name, size, pos) {
   return mesh;
 }
 target("card", [0.44, 0.08, 0.29], cardHome.toArray());
-target("cardSlot", [0.46, 0.09, 0.33], cardHome.toArray());
 target("book", [0.48, 0.12, 0.62], bookHome.toArray());
 target("bookSlot", [0.5, 0.1, 0.63], bookHome.toArray());
 target("scanner", [0.64, 0.57, 0.68], [1.22, 1.32, 0.84]);
 target("reject", [0.7, 0.18, 0.66], [-1.14, 1.14, 0.87]);
-const slotOutline = new THREE.LineSegments(
-  new THREE.EdgesGeometry(new THREE.BoxGeometry(0.42, 0.003, 0.28)),
-  new THREE.LineBasicMaterial({
-    color: "#d6c491",
-    transparent: true,
-    opacity: 0.5,
-  }),
-);
-slotOutline.position.copy(cardHome);
-slotOutline.visible = false;
-scene.add(slotOutline);
+target("customer", [0.75, 1.25, 0.45], [0, 1.2, -0.03]);
+// Rectangles use the same normalized coordinates as the printed card texture.
+const cardFields = {
+  photo: [47 / 1024, 169 / 640, 260 / 1024, 315 / 640],
+  name: [350 / 1024, 185 / 640, 610 / 1024, 130 / 640],
+  date: [350 / 1024, 355 / 640, 610 / 1024, 90 / 640],
+};
 const raycaster = new THREE.Raycaster();
 
 function tween(duration, update) {
@@ -204,24 +202,25 @@ function setTask(title) {
 }
 function updateUI() {
   const s = tx.state;
-  $("checklist").hidden = s !== "ID_INSPECT";
-  $("pass").setAttribute("aria-pressed", String(tx.checklist === "PASS"));
-  $("fail").setAttribute("aria-pressed", String(tx.checklist === "FAIL"));
   if (s !== lastUIState) {
     clearTimeout(helpTimer);
     $("inspect-help").hidden = true;
     lastUIState = s;
-    if (s.endsWith("INSPECT") && !shownHelp.has(s)) {
+    if (
+      ["BOOK_HELD", "BOOK_INSPECT", "ID_HELD"].includes(s) &&
+      !shownHelp.has(s)
+    ) {
       shownHelp.add(s);
       $("inspect-help").hidden = false;
       $("inspect-help").innerHTML =
         s === "BOOK_INSPECT"
-          ? "<span>拖动</span>旋转 <span>F</span>翻开 <span>E</span>放下 <span>Esc</span>手持"
-          : "<span>E</span>放下 <span>Esc</span>手持";
+          ? "<span>左键拖动</span>旋转 <span>滚轮</span>翻页 <span>R</span>回到手中"
+          : s === "BOOK_HELD"
+            ? "<span>R</span>仔细查看 <span>左键</span>点击目标使用"
+            : "点击证件信息提问 · 点击顾客递还";
       helpTimer = setTimeout(() => ($("inspect-help").hidden = true), 5000);
     }
   }
-  slotOutline.visible = s === "ID_HELD";
 }
 async function armGesture(side, action) {
   const arm = person.userData.arms[side];
@@ -265,6 +264,7 @@ async function start() {
     .start()
     .catch(() => toast("当前浏览器未启用声音，画面与操作仍可继续。"));
   $("welcome").hidden = true;
+  $("settings").hidden = true;
   $("opening").hidden = false;
   setTimeout(() => ($("opening").hidden = true), 2000);
   $("reticle").hidden = false;
@@ -318,7 +318,7 @@ async function start() {
   busy = false;
   updateUI();
 }
-async function inspect(kind) {
+async function pickup(kind) {
   const event = kind === "card" ? "PICK_ID" : "PICK_BOOK";
   if (!tx.dispatch(event)) return;
   busy = true;
@@ -327,20 +327,16 @@ async function inspect(kind) {
   updateUI();
   audio.paper();
   if (kind === "card")
-    await transform(
-      card,
-      camera,
-      [-0.18, -0.21, -0.71],
-      [0.045, 0.055, -0.035],
-    );
+    await transform(card, camera, [0.33, -0.12, -0.78], [0, -0.04, 0]);
   else {
     angularX = angularY = 0;
-    await transform(book, camera, [0, -0.025, -0.91], [0.02, -0.07, 0.015]);
+    await transform(book, camera, heldBookPosition, heldBookRotation);
   }
   busy = false;
 }
 async function closeCover() {
   bookOpen = false;
+  bookPage = 0;
   const from = book.userData.cover.rotation.y;
   await tween(
     0.3,
@@ -348,67 +344,55 @@ async function closeCover() {
   );
 }
 async function exitInspect() {
-  const s = tx.state;
   if (!tx.dispatch("EXIT_INSPECT")) return;
   busy = true;
   dragging = false;
   angularX = angularY = 0;
   updateUI();
-  if (s === "BOOK_INSPECT") {
-    if (bookOpen) await closeCover();
-    await transform(book, camera, [-0.05, -0.48, -0.95], [-0.38, -0.2, 0.12]);
-  } else
-    await transform(card, camera, [0.34, -0.34, -0.86], [0.1, -0.12, -0.08]);
+  if (bookOpen) await closeCover();
+  await transform(book, camera, heldBookPosition, heldBookRotation);
   busy = false;
 }
-async function putBack(kind) {
-  if (!tx.dispatch(kind === "card" ? "PUT_ID" : "PUT_BOOK")) return;
+async function putBack() {
+  if (!tx.dispatch("PUT_BOOK")) return;
   busy = true;
   audio.tap();
-  await transform(
-    kind === "card" ? card : book,
-    scene,
-    (kind === "card" ? cardHome : bookHome).toArray(),
-    flat.toArray().slice(0, 3),
-  );
+  await transform(book, scene, bookHome.toArray(), flat.toArray().slice(0, 3));
   busy = false;
   updateUI();
 }
 async function inspectAgain() {
-  const isCard = tx.state === "ID_HELD";
   if (!tx.dispatch("INSPECT_AGAIN")) return;
   busy = true;
   updateUI();
   audio.paper();
-  await transform(
-    isCard ? card : book,
-    camera,
-    isCard ? [-0.18, -0.21, -0.71] : [0, -0.025, -0.91],
-    isCard ? [0.045, 0.055, -0.035] : [0.02, -0.07, 0.015],
-  );
+  await transform(book, camera, [0.12, -0.025, -1.35], [0.02, -0.07, 0.015]);
   busy = false;
 }
-async function flip() {
+async function flip(direction) {
   if (tx.state !== "BOOK_INSPECT" || busy) return;
+  const next = THREE.MathUtils.clamp(
+    bookPage + direction,
+    0,
+    book.userData.pages.length,
+  );
+  if (next === bookPage) return;
   busy = true;
   angularX = angularY = 0;
   dragging = false;
   audio.paper();
-  if (bookOpen) {
+  if (next === 0) {
     await closeCover();
   } else {
+    book.userData.page.material.map = book.userData.pages[next - 1];
+    if (!bookOpen)
+      await tween(
+        0.38,
+        (t) => (book.userData.cover.rotation.y = -smooth(t) * Math.PI * 0.94),
+      );
     bookOpen = true;
-    await transform(
-      book,
-      camera,
-      [0.12, -0.035, -1.06],
-      [0.03, -0.02, 0],
-      0.24,
-    );
-    await tween(
-      0.38,
-      (t) => (book.userData.cover.rotation.y = -smooth(t) * Math.PI * 0.94),
-    );
+    bookPage = next;
+    await wait(0.16);
   }
   busy = false;
 }
@@ -442,10 +426,11 @@ async function commit(decision) {
     );
   }
   await wait(1.1);
-  await armGesture(1, async () => {
-    await transform(card, scene, [0.25, 1.2, 0.2], [-0.7, 0, 0], 0.3);
-    card.visible = false;
-  });
+  if (!tx.cardReturned)
+    await armGesture(1, async () => {
+      await transform(card, scene, [0.25, 1.2, 0.2], [-0.7, 0, 0], 0.3);
+      card.visible = false;
+    });
   if (decision === "borrow")
     await armGesture(0, async () => {
       await transform(book, scene, [-0.25, 1.1, 0.22], [0, 0, 0.06], 0.4);
@@ -487,16 +472,18 @@ function saveRecord() {
   if (DEV_MODE) console.info("Nightfall transaction", tx.record);
 }
 function allowedTargets() {
-  if (busy || !started || !$("settings").hidden) return [];
-  if (tx.state === "ITEMS_PLACED") return ["card", "book"];
-  if (tx.state === "ID_HELD") return ["cardSlot"];
+  if (busy || !started || !$("settings").hidden || !$("card-choice").hidden)
+    return [];
+  if (tx.state === "ITEMS_PLACED")
+    return tx.cardReturned ? ["book"] : ["card", "book"];
+  if (tx.state === "ID_HELD") return ["customer"];
   if (tx.state === "BOOK_HELD") return ["scanner", "reject", "bookSlot"];
   return [];
 }
 const labels = {
   card: "拿起",
   book: "拿起",
-  cardSlot: "放下",
+  customer: "递还证件",
   bookSlot: "放下",
   scanner: "放到借书机 · 借出",
   reject: "放入暂存盘 · 拒借",
@@ -537,9 +524,13 @@ function updateHover() {
 async function interact() {
   if (busy || !hover) return;
   const which = hover;
-  if (which === "card" || which === "book") await inspect(which);
-  else if (which === "cardSlot") await putBack("card");
-  else if (which === "bookSlot") await putBack("book");
+  if (which === "card" || which === "book") await pickup(which);
+  else if (which === "customer") {
+    clearTimeout(dialogueTimer);
+    $("dialogue").hidden = true;
+    $("card-choice").hidden = false;
+    $("return-card").focus();
+  } else if (which === "bookSlot") await putBack();
   else if (which === "scanner") await commit("borrow");
   else if (which === "reject") await commit("reject");
 }
@@ -550,11 +541,94 @@ function guard(promise) {
     toast("操作遇到问题，请刷新后重试。");
   });
 }
-async function putInspectedDown() {
-  const kind = tx.state === "ID_INSPECT" ? "card" : "book";
-  await exitInspect();
-  await putBack(kind);
+function updateCardFields() {
+  $("card-fields").hidden =
+    tx.state !== "ID_HELD" ||
+    busy ||
+    !$("settings").hidden ||
+    !$("card-choice").hidden;
+  if ($("card-fields").hidden) return;
+  for (const button of $("card-fields").children) {
+    const [x, y, w, h] = cardFields[button.dataset.field];
+    const corners = [
+      [x, y],
+      [x + w, y],
+      [x, y + h],
+      [x + w, y + h],
+    ].map(([u, v]) => {
+      const p = card
+        .localToWorld(
+          new THREE.Vector3((u - 0.5) * 0.396, (0.5 - v) * 0.248, 0.005),
+        )
+        .project(camera);
+      return [((p.x + 1) * innerWidth) / 2, ((1 - p.y) * innerHeight) / 2];
+    });
+    const xs = corners.map((p) => p[0]),
+      ys = corners.map((p) => p[1]);
+    Object.assign(button.style, {
+      left: `${Math.min(...xs)}px`,
+      top: `${Math.min(...ys)}px`,
+      width: `${Math.max(...xs) - Math.min(...xs)}px`,
+      height: `${Math.max(...ys) - Math.min(...ys)}px`,
+    });
+  }
 }
+async function questionCard(field) {
+  if (
+    busy ||
+    tx.state !== "ID_HELD" ||
+    !$("card-choice").hidden ||
+    !$("settings").hidden
+  )
+    return;
+  const lines = {
+    photo: [
+      "这张照片和你现在看起来不太一样。",
+      selectedCase === "A"
+        ? "是我，照片是前几年拍的。那时头发短一些。"
+        : "借阅证上……是以前的照片。我最近换了发型。",
+    ],
+    name: [
+      "请问，证件上的姓名是你的名字吗？",
+      `上面写的是${photoProfile.name}。`,
+    ],
+    date: [
+      "这张借阅证的有效期，你确认过吗？",
+      "上个月续过期了，有效期印在证件上。",
+    ],
+  };
+  if (!lines[field]) return;
+  busy = true;
+  dialogue(lines[field][0], "你");
+  await wait(1.6);
+  dialogue(lines[field][1]);
+  busy = false;
+}
+async function returnCard() {
+  if (busy || !tx.dispatch("RETURN_ID")) return;
+  busy = true;
+  $("card-choice").hidden = true;
+  updateUI();
+  audio.paper();
+  await armGesture(1, async () => {
+    await transform(card, scene, [0.25, 1.2, 0.2], [-0.7, 0, 0], 0.4);
+    card.visible = false;
+  });
+  dialogue("谢谢。");
+  busy = false;
+}
+$("card-fields")
+  .querySelectorAll("button")
+  .forEach((button) =>
+    button.addEventListener("click", () =>
+      guard(questionCard(button.dataset.field)),
+    ),
+  );
+$("return-card").addEventListener("click", () => guard(returnCard()));
+$("keep-card").addEventListener("click", () => {
+  $("card-choice").hidden = true;
+  dialogue("嗯，你问吧。");
+});
 $("settings-open").addEventListener(
   "click",
   () => ($("settings").hidden = false),
@@ -564,18 +638,6 @@ $("settings-close").addEventListener(
   () => ($("settings").hidden = true),
 );
 $("start").addEventListener("click", () => guard(start()));
-$("pass").addEventListener("click", () => {
-  if (busy) return;
-  tx.dispatch("CHECK_PASS");
-  audio.paper();
-  updateUI();
-});
-$("fail").addEventListener("click", () => {
-  if (busy) return;
-  tx.dispatch("CHECK_FAIL");
-  audio.paper();
-  updateUI();
-});
 $("sound").addEventListener("click", () => {
   $("sound").textContent = `声音 · ${audio.toggle() ? "开" : "关"}`;
 });
@@ -610,30 +672,30 @@ window.addEventListener("keydown", (event) => {
     ["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement.tagName)
   )
     return;
-  if (["e", "f", "r", "escape"].includes(key)) event.preventDefault();
-  if (key === "e")
-    guard(tx.state.endsWith("INSPECT") ? putInspectedDown() : interact());
+  if (["r", "escape"].includes(key)) event.preventDefault();
   if (key === "escape") {
-    if (tx.state.endsWith("INSPECT")) guard(exitInspect());
+    if (!$("card-choice").hidden) $("card-choice").hidden = true;
     else $("settings").hidden = false;
+    dragging = false;
+    angularX = angularY = 0;
   }
-  if (key === "f") guard(flip());
-  if (key === "r") guard(inspectAgain());
+  if (key === "r" && $("card-choice").hidden)
+    guard(tx.state === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
 });
 window.addEventListener("pointermove", (event) => {
-  if (!$("settings").hidden) return;
+  if (!$("settings").hidden || !$("card-choice").hidden) return;
   pointer.set(
     (event.clientX / innerWidth) * 2 - 1,
     1 - (event.clientY / innerHeight) * 2,
   );
   if (tx.state === "BOOK_INSPECT") {
-    if (dragging && !bookOpen && !busy) {
+    if (dragging && !busy) {
       angularY = (event.clientX - lastX) * 0.005;
       angularX = (event.clientY - lastY) * 0.005;
       book.rotateY(angularY);
       book.rotateX(angularX);
     }
-  } else if (started && tx.state !== "ID_INSPECT" && !busy) {
+  } else if (started && !busy) {
     targetYaw = -pointer.x * MAX_YAW;
     targetPitch = pointer.y * MAX_PITCH;
   }
@@ -641,15 +703,31 @@ window.addEventListener("pointermove", (event) => {
   lastY = event.clientY;
 });
 renderer.domElement.addEventListener("pointerdown", (event) => {
-  if (!$("settings").hidden) return;
+  if (!$("settings").hidden || !$("card-choice").hidden) return;
   if (event.button !== 0) return;
   if (tx.state === "BOOK_INSPECT" && !busy) {
     dragging = true;
     lastX = event.clientX;
     lastY = event.clientY;
     renderer.domElement.setPointerCapture(event.pointerId);
-  } else guard(interact());
+  } else {
+    pointer.set(
+      (event.clientX / innerWidth) * 2 - 1,
+      1 - (event.clientY / innerHeight) * 2,
+    );
+    updateHover();
+    guard(interact());
+  }
 });
+renderer.domElement.addEventListener(
+  "wheel",
+  (event) => {
+    if (tx.state !== "BOOK_INSPECT" || !$("settings").hidden) return;
+    event.preventDefault();
+    if (event.deltaY) guard(flip(Math.sign(event.deltaY)));
+  },
+  { passive: false },
+);
 window.addEventListener("pointerup", () => (dragging = false));
 window.addEventListener("blur", () => {
   dragging = false;
@@ -679,6 +757,12 @@ if (DEV_MODE) {
     },
     get bookOpen() {
       return bookOpen;
+    },
+    get bookPage() {
+      return bookPage;
+    },
+    get cardReturned() {
+      return tx.cardReturned;
     },
     get bookRotation() {
       return book.rotation.toArray().slice(0, 3);
@@ -742,7 +826,12 @@ function frame(now) {
     const sy = blink > 4.6 && blink < 4.75 ? 0.1 : 1;
     person.userData.eyes.forEach((eye) => (eye.scale.y = sy));
   }
-  if (tx.state === "BOOK_INSPECT" && !dragging && !busy && !bookOpen) {
+  if (
+    tx.state === "BOOK_INSPECT" &&
+    !dragging &&
+    !busy &&
+    $("settings").hidden
+  ) {
     book.rotateY(angularY * dt * 45);
     book.rotateX(angularX * dt * 45);
     const decay = Math.exp(-8 * dt);
@@ -751,6 +840,7 @@ function frame(now) {
   }
   grain.uniforms.uTime.value = time;
   scene.updateMatrixWorld();
+  updateCardFields();
   updateHover();
   composer.render();
   if (DEV_MODE)
