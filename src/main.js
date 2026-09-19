@@ -9,17 +9,27 @@ import {
   makePerson,
   makeCard,
   makeBook,
+  findBookDamage,
   box,
   material,
 } from "./assets.js";
 import { buildEnvironment } from "./environment.js";
 import { Transaction } from "./transaction.js";
+import { returnCases } from "./return-cases.js";
 import { LibraryAudio } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const DEV_MODE = query.get("dev") === "1";
 let selectedCase = query.get("case") === "B" ? "B" : "A";
+const isReturn = query.get("mode") === "return";
+const returnCase = returnCases[selectedCase];
+let press = null,
+  inspectionSnapshot = null,
+  selectedHotspot = null;
+let selectedMinFacing = 0;
+const CLICK_MOVE_THRESHOLD = 6,
+  CLICK_TIME_THRESHOLD = 250;
 let started = false,
   busy = false,
   hover = null,
@@ -107,7 +117,7 @@ const grain = new ShaderPass({
     "uniform sampler2D tDiffuse;uniform float uTime;varying vec2 vUv;void main(){vec3 c=texture2D(tDiffuse,vUv).rgb;float n=fract(sin(dot(vUv*vec2(1300.,800.)+mod(uTime,10.),vec2(12.9898,78.233)))*43758.5453);c+=(n-.5)*.018;gl_FragColor=vec4(c,1.);}",
 });
 composer.addPass(grain);
-const env = buildEnvironment(scene);
+const env = buildEnvironment(scene, { returnMode: isReturn });
 // A close, soft reflection from the work lamp keeps held paper legible from the seated side.
 const inspectionLight = new THREE.PointLight("#fff0d0", 1.3, 1.65, 2);
 inspectionLight.position.set(-0.25, 0.22, 0.12);
@@ -119,7 +129,7 @@ person.visible = false;
 // Case B uses a clearly different portrait profile; the two renderers share the same schema.
 const photoProfile = profiles.A;
 const card = makeCard(photoProfile),
-  book = makeBook();
+  book = makeBook(isReturn ? returnCase.book : undefined);
 scene.add(card, book);
 card.visible = false;
 book.visible = false;
@@ -131,7 +141,11 @@ card.rotation.copy(flat);
 book.position.copy(bookHome);
 book.rotation.copy(flat);
 const tx = new Transaction({
-  customerId: profiles[selectedCase].id,
+  type: isReturn ? "return" : "borrow",
+  customerId: isReturn ? returnCase.customerId : profiles[selectedCase].id,
+  bookId: isReturn ? returnCase.book.id : "midnight-atlas",
+  damageProfile: isReturn ? returnCase.book.damageProfile : [],
+  existingDamageBeforeLoan: isReturn ? returnCase.existingDamageBeforeLoan : [],
   actualIdentityMatch: selectedCase === "A",
 });
 
@@ -154,6 +168,8 @@ target("book", [0.48, 0.12, 0.62], bookHome.toArray());
 target("bookSlot", [0.5, 0.1, 0.63], bookHome.toArray());
 target("scanner", [0.64, 0.57, 0.68], [1.22, 1.32, 0.84]);
 target("reject", [0.7, 0.18, 0.66], [-1.14, 1.14, 0.87]);
+targets.return = targets.reject;
+if (isReturn) targets.return.userData.name = "return";
 target("customer", [0.75, 1.25, 0.45], [0, 1.2, -0.03]);
 // Rectangles use the same normalized coordinates as the printed card texture.
 const cardFields = {
@@ -172,13 +188,14 @@ function wait(seconds) {
   return tween(seconds, () => {});
 }
 const smooth = (x) => x * x * (3 - 2 * x);
-async function setCameraMode(mode, duration = 0.7) {
+async function setCameraMode(mode, duration = 0.7, framing = "face") {
   cameraMode = mode;
-  cameraBeat = mode === "DIALOGUE_FOCUS" ? "face" : "free";
+  cameraBeat = mode === "DIALOGUE_FOCUS" ? framing : "free";
   if (mode === "DIALOGUE_FOCUS") {
     const face = person.userData.head.getWorldPosition(new THREE.Vector3());
     // Aim just below the eyes: keep the face above centre and the rainy room visible.
     face.y -= 0.12;
+    if (framing === "damage") face.x += 0.07;
     const dx = face.x - camera.position.x,
       dz = camera.position.z - face.z;
     focusYaw = Math.atan2(-dx, dz);
@@ -236,7 +253,7 @@ function setTask(title) {
   taskTimer = setTimeout(() => ($("task").hidden = true), 2800);
 }
 function updateUI() {
-  const s = tx.state;
+  const s = tx.phase;
   if (s !== lastUIState) {
     clearTimeout(helpTimer);
     $("inspect-help").hidden = true;
@@ -316,9 +333,9 @@ async function start() {
     person.rotation.y = oldYaw * (1 - smooth(t));
   });
   tx.dispatch("ARRIVE");
-  setTask("处理借阅");
+  setTask(isReturn ? "处理还书" : "处理借阅");
   await setCameraMode("DIALOGUE_FOCUS");
-  dialogue("晚上好，我想借这本书。");
+  dialogue(isReturn ? "你好，我来还书。" : "晚上好，我想借这本书。");
   await wait(1.4);
   await Promise.all([
     shiftAttention("book", -2),
@@ -336,24 +353,26 @@ async function start() {
       audio.tap();
     }),
   ]);
-  await shiftAttention("face", 0, 0.35);
-  dialogue("这是我的借阅证。");
-  await Promise.all([
-    shiftAttention("card", -2),
-    armGesture(1, async () => {
-      card.visible = true;
-      card.position.set(0.25, 1.2, 0.4);
-      card.rotation.set(-1, 0, -0.1);
-      await transform(
-        card,
-        scene,
-        cardHome.toArray(),
-        flat.toArray().slice(0, 3),
-        0.3,
-      );
-      audio.paper();
-    }),
-  ]);
+  if (!isReturn) {
+    await shiftAttention("face", 0, 0.35);
+    dialogue("这是我的借阅证。");
+    await Promise.all([
+      shiftAttention("card", -2),
+      armGesture(1, async () => {
+        card.visible = true;
+        card.position.set(0.25, 1.2, 0.4);
+        card.rotation.set(-1, 0, -0.1);
+        await transform(
+          card,
+          scene,
+          cardHome.toArray(),
+          flat.toArray().slice(0, 3),
+          0.3,
+        );
+        audio.paper();
+      }),
+    ]);
+  }
   await wait(0.7);
   await setCameraMode("COUNTER_FREE", 0.5);
   tx.dispatch("PLACE_ITEMS");
@@ -389,6 +408,7 @@ async function exitInspect() {
   if (!tx.dispatch("EXIT_INSPECT")) return;
   busy = true;
   dragging = false;
+  press = null;
   angularX = angularY = 0;
   updateUI();
   if (bookOpen) await closeCover();
@@ -414,7 +434,7 @@ async function inspectAgain() {
   busy = false;
 }
 async function flip(direction) {
-  if (tx.state !== "BOOK_INSPECT" || busy) return;
+  if (tx.phase !== "BOOK_INSPECT" || busy) return;
   const next = THREE.MathUtils.clamp(
     bookPage + direction,
     0,
@@ -424,6 +444,7 @@ async function flip(direction) {
   busy = true;
   angularX = angularY = 0;
   dragging = false;
+  press = null;
   audio.paper();
   if (next === 0) {
     await closeCover();
@@ -492,6 +513,9 @@ async function commit(decision) {
       await transform(book, scene, [-0.25, 1.1, 0.22], [0, 0, 0.06], 0.4);
       person.attach(book);
     });
+  await finishVisit();
+}
+async function finishVisit() {
   await setCameraMode("COUNTER_FREE", 0.5);
   tx.dispatch("LEAVE");
   updateUI();
@@ -500,7 +524,7 @@ async function commit(decision) {
   audio.bell();
   await walkTo([2.9, 0, -4.95], 1);
   person.visible = false;
-  if (decision === "borrow") book.visible = false;
+  if (tx.decision === "borrow") book.visible = false;
   await tween(0.6, (t) => (env.door.rotation.y = -(1 - smooth(t)) * 0.95));
   tx.dispatch("COMPLETE");
   saveRecord();
@@ -509,6 +533,136 @@ async function commit(decision) {
   $("complete").hidden = false;
   setTimeout(() => ($("complete").hidden = true), 3000);
   $("dialogue").hidden = true;
+}
+function damageAtPointer() {
+  if (!isReturn || tx.phase !== "BOOK_INSPECT" || busy || !$("settings").hidden)
+    return null;
+  raycaster.setFromCamera(pointer, camera);
+  return findBookDamage(book, raycaster, bookPage);
+}
+async function selectDamage(hotspot) {
+  if (!hotspot || !tx.dispatch("SELECT_DAMAGE", hotspot.damageId)) return;
+  inspectionSnapshot = {
+    rotation: book.rotation.toArray().slice(0, 3),
+    quaternion: book.quaternion.toArray(),
+    page: bookPage,
+  };
+  busy = true;
+  press = null;
+  dragging = false;
+  angularX = angularY = 0;
+  updateUI();
+  audio.paper(0.018);
+  selectedHotspot = hotspot;
+  // Only translate: preserve the exact inspected orientation, open cover and page.
+  const from = book.position.clone(),
+    to = bookOpen
+      ? new THREE.Vector3(0.78, -0.32, -1.55)
+      : new THREE.Vector3(0.55, -0.22, -1.35);
+  const normal = new THREE.Vector3(0, 0, 1).transformDirection(
+    hotspot.surface.matrixWorld,
+  );
+  const towardEye = camera
+    .getWorldPosition(new THREE.Vector3())
+    .sub(damagePoint(hotspot))
+    .normalize();
+  selectedMinFacing = Math.max(0, normal.dot(towardEye) * 0.85);
+  // Stop before a grazing surface would turn away or become occluded.
+  const desired = to.clone();
+  to.copy(from);
+  for (let step = 1; step <= 16; step++) {
+    book.position.lerpVectors(from, desired, step / 16);
+    if (!damageInView(hotspot, selectedMinFacing)) break;
+    to.copy(book.position);
+  }
+  book.position.copy(from);
+  const lightFrom = inspectionLight.position.clone(),
+    lightTo = new THREE.Vector3(to.x, 0.18, -0.55);
+  await tween(0.4, (t) => {
+    book.position.lerpVectors(from, to, smooth(t));
+    inspectionLight.position.lerpVectors(lightFrom, lightTo, smooth(t));
+  });
+  tx.dispatch("BEGIN_DIALOGUE");
+  await setCameraMode("DIALOGUE_FOCUS", 0.7, "damage");
+  dialogue(
+    {
+      scratch: "这里的封面为什么有一道划痕？",
+      stain: "这一页上的污渍是怎么回事？",
+      tear: "这一页怎么破了？",
+    }[hotspot.type],
+    "你",
+  );
+  await wait(1.6);
+  dialogue("啊……这个。");
+  await wait(0.5);
+  dialogue("可能是不小心碰到哪里了。");
+  await wait(1.5);
+  dialogue("抱歉。");
+  await wait(0.5);
+  tx.dispatch("SHOW_DECISION");
+  busy = false;
+  $("damage-choice").hidden = false;
+  $("damage-choice").querySelector("button").focus();
+}
+function damagePoint(hotspot) {
+  book.updateWorldMatrix(true, true);
+  const size = hotspot.surface.geometry.parameters;
+  return hotspot.surface.localToWorld(
+    new THREE.Vector3(
+      (hotspot.uv.x - 0.5) * size.width,
+      (hotspot.uv.y - 0.5) * size.height,
+      0,
+    ),
+  );
+}
+function damageInView(hotspot, minimumFacing = 0) {
+  if (!hotspot) return false;
+  const point = damagePoint(hotspot);
+  const origin = camera.getWorldPosition(new THREE.Vector3());
+  const facing = new THREE.Vector3(0, 0, 1)
+    .transformDirection(hotspot.surface.matrixWorld)
+    .dot(origin.clone().sub(point).normalize());
+  const ray = new THREE.Raycaster(
+    origin,
+    point.clone().sub(origin).normalize(),
+  );
+  const projected = point.clone().project(camera);
+  return (
+    facing >= minimumFacing &&
+    Math.abs(projected.x) < 0.94 &&
+    Math.abs(projected.y) < 0.9 &&
+    findBookDamage(book, ray, bookPage)?.damageId === hotspot.damageId
+  );
+}
+async function commitReturn(decision) {
+  if (busy || !$("settings").hidden || !tx.dispatch(decision.toUpperCase()))
+    return;
+  busy = true;
+  $("damage-choice").hidden = true;
+  updateUI();
+  if (decision === "charge") {
+    dialogue("这属于借阅期间造成的损坏，需要赔偿。", "你");
+    await wait(1.8);
+    dialogue("好吧，我明白了。");
+    audio.paper(0.035);
+  } else if (decision === "waive") dialogue("谢谢。");
+  if (bookOpen) await closeCover();
+  await transform(
+    book,
+    scene,
+    [-1.14, 1.155, 0.87],
+    [-Math.PI / 2, 0, 0.04],
+    0.4,
+  );
+  inspectionLight.position.set(-0.25, 0.22, 0.12);
+  audio.tap();
+  tx.dispatch("RESPOND");
+  if (decision === "accept") {
+    await setCameraMode("DIALOGUE_FOCUS");
+    dialogue("谢谢。");
+  }
+  await wait(1.1);
+  await finishVisit();
 }
 function saveRecord() {
   if (recordSaved || !tx.record) return;
@@ -531,10 +685,13 @@ function saveRecord() {
 function allowedTargets() {
   if (busy || !started || !$("settings").hidden || !$("card-choice").hidden)
     return [];
-  if (tx.state === "ITEMS_PLACED")
-    return tx.cardReturned ? ["book"] : ["card", "book"];
-  if (tx.state === "ID_HELD") return ["customer"];
-  if (tx.state === "BOOK_HELD") return ["scanner", "reject", "bookSlot"];
+  if (tx.phase === "ITEMS_PLACED")
+    return isReturn || tx.cardReturned ? ["book"] : ["card", "book"];
+  if (tx.phase === "ID_HELD") return ["customer"];
+  if (tx.phase === "BOOK_HELD")
+    return isReturn
+      ? ["return", "bookSlot"]
+      : ["scanner", "reject", "bookSlot"];
   return [];
 }
 const labels = {
@@ -544,6 +701,7 @@ const labels = {
   bookSlot: "放下",
   scanner: "放到借书机 · 借出",
   reject: "放入暂存盘 · 拒借",
+  return: "放入归还托盘 · 收书",
 };
 function updateHover() {
   const names = allowedTargets();
@@ -561,8 +719,8 @@ function updateHover() {
   $("reticle").hidden =
     !started ||
     !$("settings").hidden ||
-    tx.state.endsWith("INSPECT") ||
-    tx.state === "TRANSACTION_COMPLETE";
+    tx.phase.endsWith("INSPECT") ||
+    tx.phase === "TRANSACTION_COMPLETE";
   $("interact").hidden = !hover;
   if (hover) {
     $("interact").querySelector("span").textContent = labels[hover];
@@ -570,10 +728,12 @@ function updateHover() {
     $("interact").style.top = `${Math.min(y + 19, innerHeight - 90)}px`;
   }
   renderer.domElement.style.cursor =
-    tx.state === "BOOK_INSPECT"
+    tx.phase === "BOOK_INSPECT"
       ? dragging
         ? "grabbing"
-        : "grab"
+        : damageAtPointer()
+          ? "pointer"
+          : "grab"
       : hover
         ? "pointer"
         : "default";
@@ -590,20 +750,21 @@ async function interact() {
   } else if (which === "bookSlot") await putBack();
   else if (which === "scanner") await commit("borrow");
   else if (which === "reject") await commit("reject");
+  else if (which === "return") await commitReturn("accept");
 }
 function guard(promise) {
   promise.catch((error) => {
     console.error(error);
     busy = false;
     cameraMode =
-      tx.state === "BOOK_INSPECT" ? "OBJECT_INSPECT" : "COUNTER_FREE";
+      tx.phase === "BOOK_INSPECT" ? "OBJECT_INSPECT" : "COUNTER_FREE";
     focusBlend = handPitch = 0;
     toast("操作遇到问题，请刷新后重试。");
   });
 }
 function updateCardFields() {
   $("card-fields").hidden =
-    tx.state !== "ID_HELD" ||
+    tx.phase !== "ID_HELD" ||
     busy ||
     !$("settings").hidden ||
     !$("card-choice").hidden;
@@ -636,7 +797,7 @@ function updateCardFields() {
 async function questionCard(field) {
   if (
     busy ||
-    tx.state !== "ID_HELD" ||
+    tx.phase !== "ID_HELD" ||
     !$("card-choice").hidden ||
     !$("settings").hidden
   )
@@ -723,6 +884,27 @@ $("ambience-volume").addEventListener("input", (event) =>
   audio.setAmbienceVolume(event.target.value / 100),
 );
 $("again").addEventListener("click", () => location.reload());
+$("case-label").textContent = isReturn ? "练习还书访客" : "练习借书访客";
+$("complete").querySelector("p").textContent = isReturn
+  ? "本次还书处理已记录"
+  : "本次借阅处理已记录";
+document.querySelectorAll("[data-mode]").forEach((button) => {
+  button.setAttribute(
+    "aria-pressed",
+    String(button.dataset.mode === (isReturn ? "return" : "borrow")),
+  );
+  button.addEventListener("click", () => {
+    query.set("mode", button.dataset.mode);
+    location.search = query.toString();
+  });
+});
+document
+  .querySelectorAll("[data-decision]")
+  .forEach((button) =>
+    button.addEventListener("click", () =>
+      guard(commitReturn(button.dataset.decision)),
+    ),
+  );
 document.querySelectorAll("[data-case]").forEach((button) => {
   button.setAttribute(
     "aria-pressed",
@@ -757,10 +939,11 @@ window.addEventListener("keydown", (event) => {
     if (!$("card-choice").hidden) $("card-choice").hidden = true;
     else $("settings").hidden = false;
     dragging = false;
+    press = null;
     angularX = angularY = 0;
   }
   if (key === "r" && $("card-choice").hidden)
-    guard(tx.state === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
+    guard(tx.phase === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
 });
 window.addEventListener("pointermove", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
@@ -768,7 +951,18 @@ window.addEventListener("pointermove", (event) => {
     (event.clientX / innerWidth) * 2 - 1,
     1 - (event.clientY / innerHeight) * 2,
   );
-  if (tx.state === "BOOK_INSPECT") {
+  if (tx.phase === "BOOK_INSPECT") {
+    if (press && !busy) {
+      const distance = Math.hypot(
+        event.clientX - press.x,
+        event.clientY - press.y,
+      );
+      if (
+        distance > CLICK_MOVE_THRESHOLD ||
+        (distance > 0 && performance.now() - press.time > CLICK_TIME_THRESHOLD)
+      )
+        dragging = true;
+    }
     if (dragging && !busy) {
       angularY = (event.clientX - lastX) * 0.005;
       angularX = (event.clientY - lastY) * 0.005;
@@ -785,8 +979,20 @@ window.addEventListener("pointermove", (event) => {
 renderer.domElement.addEventListener("pointerdown", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
   if (event.button !== 0) return;
-  if (tx.state === "BOOK_INSPECT" && !busy) {
-    dragging = true;
+  if (tx.phase === "BOOK_INSPECT" && !busy) {
+    pointer.set(
+      (event.clientX / innerWidth) * 2 - 1,
+      1 - (event.clientY / innerHeight) * 2,
+    );
+    press = {
+      x: event.clientX,
+      y: event.clientY,
+      time: performance.now(),
+      pointerId: event.pointerId,
+      damageId: damageAtPointer()?.damageId,
+    };
+    dragging = false;
+    angularX = angularY = 0;
     lastX = event.clientX;
     lastY = event.clientY;
     renderer.domElement.setPointerCapture(event.pointerId);
@@ -802,14 +1008,39 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
 renderer.domElement.addEventListener(
   "wheel",
   (event) => {
-    if (tx.state !== "BOOK_INSPECT" || !$("settings").hidden) return;
+    if (tx.phase !== "BOOK_INSPECT" || !$("settings").hidden) return;
     event.preventDefault();
     if (event.deltaY) guard(flip(Math.sign(event.deltaY)));
   },
   { passive: false },
 );
-window.addEventListener("pointerup", () => (dragging = false));
+window.addEventListener("pointerup", (event) => {
+  if (
+    press &&
+    press.pointerId === event.pointerId &&
+    !dragging &&
+    performance.now() - press.time <= CLICK_TIME_THRESHOLD &&
+    Math.hypot(event.clientX - press.x, event.clientY - press.y) <=
+      CLICK_MOVE_THRESHOLD
+  ) {
+    pointer.set(
+      (event.clientX / innerWidth) * 2 - 1,
+      1 - (event.clientY / innerHeight) * 2,
+    );
+    const hotspot = damageAtPointer();
+    if (hotspot && hotspot.damageId === press.damageId)
+      guard(selectDamage(hotspot));
+  }
+  press = null;
+  dragging = false;
+});
+window.addEventListener("pointercancel", () => {
+  press = null;
+  dragging = false;
+  angularX = angularY = 0;
+});
 window.addEventListener("blur", () => {
+  press = null;
   dragging = false;
   angularX = angularY = 0;
 });
@@ -846,6 +1077,36 @@ if (DEV_MODE) {
     },
     get bookRotation() {
       return book.rotation.toArray().slice(0, 3);
+    },
+    get bookQuaternion() {
+      return book.quaternion.toArray();
+    },
+    get selectedDamageVisible() {
+      return damageInView(selectedHotspot, selectedMinFacing);
+    },
+    get inspectionSnapshot() {
+      return inspectionSnapshot && structuredClone(inspectionSnapshot);
+    },
+    projectDamage(id) {
+      const h = book.userData.damageHotspots.find(
+        (h) => h.damageId === id && h.page === bookPage && h.enabled,
+      );
+      if (!h) return null;
+      const [u, v, w, height] = h.uvRect,
+        size = h.surface.geometry.parameters;
+      const p = h.surface
+        .localToWorld(
+          new THREE.Vector3(
+            (u + w / 2 - 0.5) * size.width,
+            (0.5 - v - height / 2) * size.height,
+            0,
+          ),
+        )
+        .project(camera);
+      return {
+        x: ((p.x + 1) * innerWidth) / 2,
+        y: ((1 - p.y) * innerHeight) / 2,
+      };
     },
     project(name) {
       const object = targets[name];
@@ -946,8 +1207,9 @@ function frame(now) {
     person.userData.eyes.forEach((eye) => (eye.scale.y = sy));
   }
   if (
-    tx.state === "BOOK_INSPECT" &&
+    tx.phase === "BOOK_INSPECT" &&
     !dragging &&
+    !press &&
     !busy &&
     $("settings").hidden
   ) {
@@ -964,6 +1226,10 @@ function frame(now) {
   composer.render();
   if (DEV_MODE)
     $("dev-panel").textContent =
-      `DEV · ${selectedCase}\n${tx.state}\n身份: ${tx.actualIdentityMatch ? "MATCH" : "MISMATCH"}\n勾选: ${tx.checklist ?? "NULL"}\n操作: ${tx.decision ?? "—"}\n正确: ${tx.record?.isCorrect ?? "—"}`;
+      `DEV · ${tx.type} ${selectedCase}\n${tx.state}\n` +
+      (isReturn
+        ? `损坏: ${tx.record?.actualDamagePresent ?? "—"}\n责任: ${tx.record?.actualDamageResponsibility ?? "—"}`
+        : `身份: ${tx.actualIdentityMatch ? "MATCH" : "MISMATCH"}\n勾选: ${tx.checklist ?? "NULL"}`) +
+      `\n操作: ${tx.decision ?? "—"}\n正确: ${tx.record?.isCorrect ?? "—"}`;
 }
 requestAnimationFrame(frame);

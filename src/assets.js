@@ -434,7 +434,69 @@ export function makeCard(profile) {
   plane(card, 0.396, 0.248, [0, 0, 0.004], texture);
   return card;
 }
-export function makeBook() {
+function drawDamage(ctx, w, h, damages, page) {
+  for (const damage of damages.filter((d) => d.visible && d.page === page)) {
+    const [u, v, width, height] = damage.uvRect;
+    ctx.save();
+    ctx.translate(u * w, v * h);
+    ctx.scale(width * w, height * h);
+    if (damage.type === "scratch") {
+      ctx.strokeStyle = "#b4b19a";
+      ctx.lineWidth = 0.025;
+      ctx.beginPath();
+      ctx.moveTo(0.06, 0.83);
+      ctx.lineTo(0.46, 0.49);
+      ctx.lineTo(0.91, 0.13);
+      ctx.moveTo(0.24, 0.79);
+      ctx.lineTo(0.67, 0.39);
+      ctx.stroke();
+    } else if (damage.type === "stain") {
+      ctx.fillStyle = "#73503642";
+      ctx.strokeStyle = "#78553865";
+      ctx.lineWidth = 0.05;
+      ctx.beginPath();
+      ctx.ellipse(0.5, 0.5, 0.44, 0.37, -0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    } else if (damage.type === "tear") {
+      // A flat paper scar exposes the darker sheet below, without adding meshes.
+      ctx.fillStyle = "#ad9f81";
+      ctx.beginPath();
+      ctx.moveTo(1, 0);
+      ctx.lineTo(0.67, 0.22);
+      ctx.lineTo(0.71, 0.39);
+      ctx.lineTo(0.36, 0.54);
+      ctx.lineTo(0.4, 0.72);
+      ctx.lineTo(0, 1);
+      ctx.lineTo(1, 1);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#efe3c7";
+      ctx.lineWidth = 0.025;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+export function findBookDamage(book, raycaster, page) {
+  const hit = raycaster.intersectObject(book, true)[0];
+  if (!hit?.uv) return null;
+  const hotspot = book.userData.damageHotspots.find((h) => {
+    const [x, y, w, height] = h.uvRect;
+    return (
+      h.enabled &&
+      h.page === page &&
+      h.surface === hit.object &&
+      hit.uv.x >= x &&
+      hit.uv.x <= x + w &&
+      1 - hit.uv.y >= y &&
+      1 - hit.uv.y <= y + height
+    );
+  });
+  return hotspot ? { ...hotspot, uv: hit.uv.clone() } : null;
+}
+export function makeBook(spec = {}) {
+  const damages = spec.damageProfile || [];
   const root = new THREE.Group(),
     coverMat = material("#233f3d"),
     gold = material("#b6a170");
@@ -467,40 +529,72 @@ export function makeBook() {
     ctx.font = "17px Georgia";
     ctx.fillText("THE NIGHTFALL COLLECTION", w / 2, 93);
     ctx.font = "52px Georgia";
-    ctx.fillText("THE MIDNIGHT", w / 2, 205);
-    ctx.font = "70px Georgia";
-    ctx.fillText("ATLAS", w / 2, 290);
+    ctx.fillText(spec.englishTitle?.[0] || "THE MIDNIGHT", w / 2, 205);
+    ctx.font = spec.englishTitle ? "52px Georgia" : "70px Georgia";
+    ctx.fillText(spec.englishTitle?.[1] || "ATLAS", w / 2, 290);
     ctx.font = "24px Microsoft YaHei";
-    ctx.fillText("午 夜 图 谱", w / 2, 346);
+    ctx.fillText(spec.title || "午 夜 图 谱", w / 2, 346);
     ctx.save();
     ctx.translate(w / 2, 523);
     ctx.strokeStyle = "#b6a271";
-    for (const radius of [103, 113, 142]) {
+    if (spec.art === "lighthouse") {
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    for (let a = 0; a < 8; a++) {
-      ctx.save();
-      ctx.rotate((a * Math.PI) / 4);
-      ctx.beginPath();
-      ctx.moveTo(0, -122);
-      ctx.lineTo(18, -23);
-      ctx.lineTo(0, 0);
-      ctx.lineTo(-18, -23);
+      ctx.moveTo(-43, 110);
+      ctx.lineTo(-25, -61);
+      ctx.lineTo(25, -61);
+      ctx.lineTo(43, 110);
       ctx.closePath();
       ctx.stroke();
-      ctx.restore();
+      ctx.strokeRect(-32, -87, 64, 26);
+      ctx.beginPath();
+      ctx.moveTo(-42, -89);
+      ctx.lineTo(0, -117);
+      ctx.lineTo(42, -89);
+      ctx.moveTo(-120, -55);
+      ctx.lineTo(-36, -76);
+      ctx.moveTo(36, -76);
+      ctx.lineTo(120, -55);
+      ctx.moveTo(-105, 113);
+      ctx.lineTo(105, 113);
+      ctx.stroke();
+    } else if (spec.art === "rain") {
+      for (let i = 0; i < 7; i++) {
+        ctx.strokeRect(-112 + i * 32, 45 - (i % 3) * 27, 24, 80 + (i % 3) * 27);
+        ctx.beginPath();
+        ctx.moveTo(-105 + i * 33, -110);
+        ctx.lineTo(-116 + i * 33, -62);
+        ctx.stroke();
+      }
+    } else {
+      for (const radius of [103, 113, 142]) {
+        ctx.beginPath();
+        ctx.arc(0, 0, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      for (let a = 0; a < 8; a++) {
+        ctx.save();
+        ctx.rotate((a * Math.PI) / 4);
+        ctx.beginPath();
+        ctx.moveTo(0, -122);
+        ctx.lineTo(18, -23);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(-18, -23);
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.fillStyle = "#c6b27b";
+      ctx.beginPath();
+      ctx.arc(0, 0, 7, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.fillStyle = "#c6b27b";
-    ctx.beginPath();
-    ctx.arc(0, 0, 7, 0, Math.PI * 2);
-    ctx.fill();
     ctx.restore();
     ctx.font = "20px Georgia";
     ctx.fillText("E L I A S   W R E N", w / 2, 742);
+    drawDamage(ctx, w, h, damages, 0);
   });
-  plane(pivot, 0.438, 0.575, [0.222, 0, 0.0076], cover);
+  const front = plane(pivot, 0.438, 0.575, [0.222, 0, 0.0076], cover);
   plane(
     pivot,
     0.432,
@@ -520,7 +614,11 @@ export function makeBook() {
       ctx.fillStyle = "#526052";
       ctx.textAlign = "center";
       ctx.font = "18px Georgia";
-      ctx.fillText("THE MIDNIGHT ATLAS", w / 2, 76);
+      ctx.fillText(
+        spec.englishTitle?.join(" ") || "THE MIDNIGHT ATLAS",
+        w / 2,
+        76,
+      );
       ctx.fillRect(57, 98, w - 114, 1);
       ctx.font = "38px Georgia";
       ctx.fillText(
@@ -580,6 +678,7 @@ export function makeBook() {
         w / 2,
         795,
       );
+      drawDamage(ctx, w, h, damages, pageIndex + 1);
     }),
   );
   root.userData.pages = pages;
@@ -603,5 +702,15 @@ export function makeBook() {
     [0, Math.PI, 0],
   );
   root.userData.cover = pivot;
+  root.userData.damageHotspots = damages
+    .filter((d) => d.visible && ["scratch", "stain", "tear"].includes(d.type))
+    .map((d) => ({
+      damageId: d.id,
+      type: d.type,
+      page: d.page,
+      uvRect: d.uvRect,
+      enabled: true,
+      surface: d.page === 0 ? front : root.userData.page,
+    }));
   return root;
 }

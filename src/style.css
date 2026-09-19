@@ -304,7 +304,8 @@ h1 em {
   border-color: #695c39;
   background: #c6b58518;
 }
-#card-choice {
+#card-choice,
+#damage-choice {
   position: absolute;
   left: 50%;
   bottom: 140px;
@@ -313,7 +314,11 @@ h1 em {
   gap: 12px;
   z-index: 6;
 }
-#card-choice button {
+#damage-choice {
+  bottom: 180px;
+}
+#card-choice button,
+#damage-choice button {
   color: var(--cream);
   background: #151d1cf2;
   border: 1px solid #ad966f66;

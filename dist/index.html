@@ -9,8 +9,8 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%231c2926'/%3E%3Cpath d='M27 7a14 14 0 1 0 6 23A13 13 0 0 1 27 7' fill='%23d4b780'/%3E%3C/svg%3E"
     />
     <title>夜阑图书馆 · Nightfall Library</title>
-    <script type="module" crossorigin src="/assets/index-BpqQU1qU.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DQL31x1D.css">
+    <script type="module" crossorigin src="/assets/index-BGpOGtys.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-XiY6g3xF.css">
   </head>
   <body>
     <main id="game" aria-label="夜阑图书馆，三维借阅柜台"></main>
@@ -31,11 +31,13 @@
         <p class="intro">
           雨还没有停，图书馆仍亮着灯。<br />坐在熟悉的柜台后，开始你的第一晚值班。
         </p>
-        <button id="start" class="start-button">
-          开始值班 <span>↗</span>
-        </button>
+        <button id="start" class="start-button">开始值班 <span>↗</span></button>
         <div class="case-select">
-          <span>练习访客</span
+          <button data-mode="borrow">借书测试</button>
+          <button data-mode="return">还书测试</button>
+        </div>
+        <div class="case-select">
+          <span id="case-label">练习访客</span
           ><button data-case="A" aria-pressed="true">01</button
           ><button data-case="B" aria-pressed="false">02</button
           ><span class="case-note">每次仅接待一人</span>
@@ -66,6 +68,10 @@
       <button id="keep-card">我还有问题</button>
     </div>
     <div id="reticle" hidden aria-hidden="true"></div>
+    <div id="damage-choice" hidden role="group" aria-label="还书处理">
+      <button data-decision="charge">要求赔偿</button>
+      <button data-decision="waive">不追究</button>
+    </div>
     <div id="interact" hidden><kbd>左键</kbd><span></span></div>
     <div id="inspect-help" hidden></div>
     <section id="dialogue" hidden aria-live="polite">
@@ -96,6 +102,7 @@
         左键点击物件，拿到右手；点击目标位置使用或放置。<br />
         R 进入 / 退出书籍检视，按住左键拖动旋转，滚轮翻页。<br />
         点击证件照片、姓名或日期直接提问；点击顾客递还证件。<br />
+        还书时，在检视中短按书上可疑位置提问；或将手中的书放入归还托盘。<br />
         Esc 打开 / 关闭此页。
       </p>
       <button id="settings-close" class="text-button">返回柜台</button>

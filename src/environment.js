@@ -11,7 +11,7 @@ import {
   seeded,
 } from "./assets.js";
 
-export function buildEnvironment(scene) {
+export function buildEnvironment(scene, { returnMode = false } = {}) {
   const walnut = woodMaterial("#483326"),
     deskWood = woodMaterial("#62462e"),
     darkWood = material("#262521"),
@@ -249,7 +249,7 @@ export function buildEnvironment(scene) {
     0.35,
     0.063,
     [0, 0.055, 0.324],
-    textTexture(["待 处 理"], {
+    textTexture([returnMode ? "归 还" : "待 处 理"], {
       w: 512,
       h: 128,
       bg: "#b9ad89",
