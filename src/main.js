@@ -20,9 +20,10 @@ import { returnCases } from "./return-cases.js";
 import { CustomerSequenceController, daySequence } from "./memory-loop.js";
 import { LibraryAudio } from "./audio.js";
 import { ClosingReading, personalReadingBook } from './closing-reading.js';
-import { NightShelvingController } from './night-shelving.js';
+import { NightShelvingController, shelvingDefinitions } from './night-shelving.js';
 import { buildShelvingWorld, moveWalker } from './night-world.js';
 import { NightClearingController, buildClearingVisitors } from './night-clearing.js';
+import { NightRecommendationController, buildNightRecommendation } from './night-recommendation.js';
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
@@ -34,6 +35,8 @@ const entryMode = query.get('mode');
 let gamePhase = 'DAY_COUNTER', personalHeld = false, nightHover = null;
 const reading = new ClosingReading(), shelving = new NightShelvingController();
 const clearing = new NightClearingController();
+const recommendation = new NightRecommendationController(shelving);
+let recommendationDelay = 0;
 let clearingDelay = 0, clearedDelay = 0, clearingAnnounced = false, doorVisitor = null;
 let nightFocus = null;
 const keys = new Set();
@@ -152,6 +155,18 @@ renderer.toneMappingExposure = 0.88;
 $("game").appendChild(renderer.domElement);
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+// First-person items keep their own depth, but furniture cannot slice through a held page.
+const heldPass = new RenderPass(scene, camera);
+heldPass.clear = false;
+heldPass.clearDepth = true;
+const renderHeld = heldPass.render.bind(heldPass);
+heldPass.render = (...args) => {
+  const mask = camera.layers.mask, background = scene.background;
+  camera.layers.set(1); scene.background = null;
+  try { renderHeld(...args); }
+  finally { camera.layers.mask = mask; scene.background = background; }
+};
+composer.addPass(heldPass);
 composer.addPass(
   new UnrealBloomPass(
     new THREE.Vector2(innerWidth, innerHeight),
@@ -172,6 +187,11 @@ composer.addPass(grain);
 const env = buildEnvironment(scene, { returnMode: isReturn });
 const nightWorld = buildShelvingWorld(scene, env.sortingShelves, shelving);
 const clearingWorld = buildClearingVisitors(scene, clearing);
+const recommendationWorld = buildNightRecommendation(scene, recommendation, {
+  camera, audio, tween, wait, dialogue, run: guard,
+  focus: (mode, actor) => setCameraMode(mode, mode === 'FREE_LOOK' ? .45 : .55, 'door', actor),
+  lockInput: locked => { busy = locked; keys.clear(); touchMove.forward = touchMove.sideways = 0; },
+});
 const personalModel = makeBook(personalReadingBook);
 const personalHome = [.7, 1.105, 1.69];
 personalModel.position.fromArray(personalHome);
@@ -181,6 +201,7 @@ scene.add(personalModel);
 const inspectionLight = new THREE.PointLight("#fff0d0", 1.3, 1.65, 2);
 inspectionLight.position.set(-0.25, 0.22, 0.12);
 camera.add(inspectionLight);
+scene.traverse(object => { if (object.isLight) object.layers.enable(1); });
 let person = makePerson(personProfile);
 scene.add(person);
 person.position.set(2.9, 0, -4.85);
@@ -250,6 +271,7 @@ const cardFields = {
   date: [350 / 1024, 355 / 640, 610 / 1024, 90 / 640],
 };
 const raycaster = new THREE.Raycaster();
+raycaster.layers.enable(1);
 
 function prepareVisit(next) {
   person.removeFromParent();
@@ -313,7 +335,8 @@ async function setCameraMode(mode, duration = 0.7, framing = "face", actor = per
       nightFocus = {origin: camera.position.clone(), startYaw: camera.rotation.y,
         startPitch: camera.rotation.x,
         yaw: camera.rotation.y + Math.atan2(Math.sin(yaw - camera.rotation.y), Math.cos(yaw - camera.rotation.y)),
-        pitch: Math.atan2(face.y - camera.position.y, Math.hypot(dx, dz)), dx: 0, dy: 0};
+        pitch: Math.atan2(face.y - camera.position.y, Math.hypot(dx, dz)), dx: 0, dy: 0,
+        dolly: framing === 'door' ? .01 : .015};
       cameraMode = 'DIALOGUE_FOCUS';
     }
     const from = focusBlend, to = mode === 'DIALOGUE_FOCUS' ? 1 : 0;
@@ -356,6 +379,7 @@ async function shiftAttention(beat, degrees, duration = 0.5) {
   );
 }
 async function transform(object, parent, position, rotation, duration = 0.32) {
+  object.traverse(part => part.layers.set(parent === camera ? 1 : 0));
   parent.attach(object);
   const from = object.position.clone(),
     fromQ = object.quaternion.clone(),
@@ -460,13 +484,13 @@ async function start() {
   $("reticle").hidden = false;
   await wait(1.3);
   if (entryMode === 'closing') return beginClosingReading();
-  if (['shelving', 'clearing'].includes(entryMode)) {
+  if (['shelving', 'clearing', 'recommendation'].includes(entryMode)) {
     env.setClosed();
     [1, 2, 3, 4].forEach(page => reading.readPages.add(page));
     document.querySelector('.clock').textContent = '22:00';
     camera.position.set(3.15, 1.85, 2.65);
     enterNight();
-    if (entryMode === 'clearing') {
+    if (['clearing', 'recommendation'].includes(entryMode)) {
       for (const id of shelving.taskBookIds) {
         const slot = shelving.slots.find(s => !s.occupantBookId && s.category === shelving.books.get(id).category);
         shelving.pickup(id);
@@ -477,6 +501,12 @@ async function start() {
         model.rotation.set(...slot.localRotation);
       }
       beginClearing();
+      if (entryMode === 'recommendation') {
+        for (const v of clearing.visitors) { v.state = 'EXITED'; v.hasExited = true; }
+        clearingAnnounced = true;
+        $('toast').hidden = true;
+        gamePhase = 'NIGHT_CLEARING_COMPLETE';
+      }
     }
     return;
   }
@@ -779,6 +809,7 @@ function enterNight() {
 async function nightInteract() {
   if (busy || !nightHover) return;
   const hit = nightHover;
+  if (hit.recommendation) return recommendationWorld.interact();
   if (hit.visitorId) return remindVisitor(hit.visitorId);
   if (!shelving.heldBookId) {
     const id = hit.bookId || hit.slot?.occupantBookId;
@@ -824,14 +855,20 @@ function updateNightHover() {
     const hand = new THREE.Vector3(camera.position.x, .8, camera.position.z);
     const hits = raycaster.intersectObjects(scene.children.filter(o => o !== camera && !Object.values(targets).includes(o)), true);
     for (const hit of hits) {
-      let node = hit.object, visible = true, bookId, visitorId;
-      while (node) { visible &&= node.visible; bookId ||= node.userData.shelvingBookId; visitorId ||= node.userData.clearingVisitorId; node = node.parent; }
+      let node = hit.object, visible = true, bookId, visitorId, recommendationVisitor;
+      while (node) { visible &&= node.visible; bookId ||= node.userData.shelvingBookId; visitorId ||= node.userData.clearingVisitorId;
+        recommendationVisitor ||= node.userData.recommendationVisitor; node = node.parent; }
       if (!visible) continue;
+      if (recommendationVisitor) {
+        if (recommendationWorld.canInteract()) nightHover = {recommendation: true};
+        break;
+      }
       if (visitorId) {
         if (clearing.canTalkTo(visitorId, camera.position) && !shelving.heldBookId)
           nightHover = {visitorId, distance: Math.hypot(camera.position.x - clearing.getVisitor(visitorId).position[0], camera.position.z - clearing.getVisitor(visitorId).position[2])};
         break;
       }
+      if (hit.object.material?.transparent && !hit.object.userData.slotId) continue;
       if (hit.distance > 2.4 || hand.distanceTo(hit.point) > 1.5) break;
       const slot = shelving.slots.find(s => s.slotId === hit.object.userData.slotId);
       if (slot || bookId) nightHover = {slot, bookId, distance: hand.distanceTo(hit.point)};
@@ -839,11 +876,11 @@ function updateNightHover() {
       if (nightHover || !hit.object.material?.transparent) break;
     }
   }
-  const actionable = nightHover && (nightHover.visitorId || (shelving.heldBookId ? nightHover.slot && !nightHover.slot.occupantBookId : nightHover.bookId || nightHover.slot?.occupantBookId));
+  const actionable = nightHover && (nightHover.recommendation || nightHover.visitorId || (shelving.heldBookId ? nightHover.slot && !nightHover.slot.occupantBookId : nightHover.bookId || nightHover.slot?.occupantBookId));
   $('reticle').classList.toggle('hot', !!actionable);
-  if (nightHover?.visitorId) {
+  if (nightHover?.visitorId || nightHover?.recommendation) {
     $('interact').hidden = false;
-    $('interact').querySelector('span').textContent = '提醒闭馆';
+    $('interact').querySelector('span').textContent = nightHover.recommendation ? recommendationWorld.label : '提醒闭馆';
     $('interact').style.left = `${innerWidth / 2 + 19}px`;
     $('interact').style.top = `${innerHeight / 2 + 19}px`;
   }
@@ -1004,6 +1041,7 @@ function damageInView(hotspot, minimumFacing = 0) {
     origin,
     point.clone().sub(origin).normalize(),
   );
+  ray.layers.enable(1);
   const projected = point.clone().project(camera);
   return (
     facing >= minimumFacing &&
@@ -1279,7 +1317,7 @@ $("ambience-volume").addEventListener("input", (event) =>
 );
 $("again").addEventListener("click", () => location.reload());
 $("case-label").textContent = isReturn ? "练习还书访客" : "练习借书访客";
-$("case-label").parentElement.hidden = isMemory || ['closing', 'shelving', 'clearing'].includes(entryMode);
+$("case-label").parentElement.hidden = isMemory || ['closing', 'shelving', 'clearing', 'recommendation'].includes(entryMode);
 $("complete").querySelector("p").textContent = isReturn
   ? "本次还书处理已记录"
   : "本次借阅处理已记录";
@@ -1603,6 +1641,8 @@ if (DEV_MODE) {
         slots: shelving.slots, books: [...shelving.books.values()],
         time: reading.time, page: reading.page, dwell: reading.dwell, advances: reading.advances,
         closingReady: reading.ready, closed: env.closed, personalHeld,
+        recommendation: {...recommendationWorld.diagnostics, hovered: !!nightHover?.recommendation,
+          heldTags: shelvingDefinitions.find(d => d.id === shelving.books.get(shelving.heldBookId)?.definitionId)?.recommendationTags || []},
         clearing: {active: clearing.active, visitors: clearing.visitors,
           remaining: clearing.getLingeringVisitors().length, dialogueTarget: clearing.dialogueTarget,
           talkDistance: clearing.talkDistance, hoveredVisitor: nightHover?.visitorId,
@@ -1611,6 +1651,7 @@ if (DEV_MODE) {
       });
     },
     nightPosition(id) {
+      if (id === 'chen_yao') return recommendationWorld.actor.userData.head.getWorldPosition(new THREE.Vector3()).toArray();
       const visitor = clearingWorld.models.get(id)?.model;
       if (visitor) return visitor.userData.head.getWorldPosition(new THREE.Vector3()).toArray();
       const object = nightWorld.books.get(id) || nightWorld.slotTargets.find(o => o.userData.slotId === id);
@@ -1770,7 +1811,7 @@ function frame(now) {
   if (isNight() && nightFocus) {
     camera.rotation.y = THREE.MathUtils.lerp(nightFocus.startYaw, nightFocus.yaw + nightFocus.dx, focusBlend);
     camera.rotation.x = THREE.MathUtils.lerp(nightFocus.startPitch, nightFocus.pitch + nightFocus.dy, focusBlend);
-    camera.position.copy(nightFocus.origin).addScaledVector(new THREE.Vector3(-Math.sin(nightFocus.yaw), 0, -Math.cos(nightFocus.yaw)), .015 * focusBlend);
+    camera.position.copy(nightFocus.origin).addScaledVector(new THREE.Vector3(-Math.sin(nightFocus.yaw), 0, -Math.cos(nightFocus.yaw)), nightFocus.dolly * focusBlend);
   }
   const fov = 67 - (isNight() ? 3.5 : 5) * focusBlend;
   if (camera.fov !== fov) {
@@ -1841,6 +1882,14 @@ function frame(now) {
       }
     }
     clearingWorld.update(dt, time);
+    if ($('settings').hidden) {
+      if (gamePhase === 'NIGHT_CLEARING_COMPLETE' && !recommendation.phase) {
+        recommendationDelay += dt;
+        if (recommendationDelay >= 1) recommendation.startWaiting();
+      }
+      recommendationWorld.update(dt, time);
+      if (recommendation.phase) gamePhase = recommendation.phase;
+    }
   }
   if (person.visible) {
     person.userData.body.position.y = Math.sin(time * 1.3) * 0.004;
@@ -1872,11 +1921,12 @@ function frame(now) {
     $("mobile-stick").hidden = $("mobile-action").hidden = !isNight();
     $("mobile-inspect").disabled = !held && !inspecting;
     $("mobile-prev").hidden = $("mobile-next").hidden = !inspecting;
-    $("mobile-action").textContent = nightHover?.visitorId ? '提醒闭馆' : nightHover || hover ? "使用" : "观察";
+    $("mobile-action").textContent = nightHover?.recommendation ? recommendationWorld.label : nightHover?.visitorId ? '提醒闭馆' : nightHover || hover ? "使用" : "观察";
   }
   scene.updateMatrixWorld();
   updateCardFields();
   updateHover();
+  heldPass.enabled = book.parent === camera || card.parent === camera;
   composer.render();
   if (DEV_MODE)
     $("dev-panel").textContent =
@@ -1891,5 +1941,9 @@ function frame(now) {
   if (DEV_MODE && gamePhase !== 'DAY_COUNTER')
     $('dev-panel').textContent = `${gamePhase} / ${cameraMode}\n${reading.time} · page ${bookPage} · dwell ${reading.dwell.toFixed(1)} · advances ${reading.advances} · ready ${reading.ready}\nheld ${shelving.heldBookId || '—'} / ${shelving.books.get(shelving.heldBookId)?.category || '—'}\nslot ${nightHover?.slot?.slotId || '—'} · occupied ${nightHover?.slot?.occupantBookId || '—'}\npending ${shelving.getPendingBooks().length} · correct ${shelving.getFinalLayout().filter(p => p.isCorrect).length} · wrong ${shelving.getFinalLayout().filter(p => !p.isCorrect).length}\nposition ${camera.position.toArray().map(n => n.toFixed(2)).join(', ')} · reach ${nightHover?.distance?.toFixed(2) || '—'}`;
   if (DEV_MODE && isNight()) $('dev-panel').textContent += `\nRemaining Visitors ${clearing.getLingeringVisitors().length} · target ${clearing.dialogueTarget || '—'} · talk ${clearing.talkDistance}m\n${clearing.visitors.map(v => `${v.id}: ${v.state} · asked ${v.hasBeenAskedToLeave} · exited ${v.hasExited}`).join('\n')}\nDoor outside locked ${env.lockedFromOutside} · inside exit ${env.canExitFromInside} · angle ${env.door.rotation.y.toFixed(2)}`;
+  if (DEV_MODE && recommendation.phase) {
+    const r = recommendationWorld.diagnostics;
+    $('dev-panel').textContent += `\nVisitor ${r.visitorState} · knocks ${r.knocks}\nRequest ${r.request.id}\nRequired ${r.request.requiredTags.join(', ')}\nAcceptable ${r.request.acceptableBookIds.join(', ')}\nHeld tags ${window.library.night.recommendation.heldTags.join(', ')}\nSubmitted ${r.result?.recommendedBookId || '—'} · Is Correct ${r.result?.isCorrect ?? '—'}\nVisitor Exited ${!!r.result?.visitorExitedAt} · Recommended Book Reshelved ${r.recommendedBookReshelved}`;
+  }
 }
 requestAnimationFrame(frame);

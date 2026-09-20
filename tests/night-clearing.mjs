@@ -145,6 +145,8 @@ try {
   }
   const childProgress = samples.map(s => s.clearing.visitors.find(v => v.id === 'child').standProgress);
   assert.ok(childProgress.every((n, i) => !i || n >= childProgress[i - 1]), 'child stands once without resetting');
+  await page.waitForFunction(() => window.library.night.gamePhase === 'NIGHT_RECOMMENDATION_WAIT');
+  assert.equal((await state()).recommendation.visible, false, 'clearing hands off to a quiet interval');
   console.log(`PASS: ${order.join(' → ')}; distance, focus, paths, exit door, no premature completion and free roam.`);
  }
   await page.goto(`${base}/?mode=clearing`);

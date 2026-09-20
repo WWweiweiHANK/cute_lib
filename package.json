@@ -8,11 +8,12 @@
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
     "build": "vite build --base=./",
     "preview": "vite preview --host 127.0.0.1 --port 5178 --strictPort",
-    "test": "node --test tests/transaction.test.js tests/night-state.test.mjs",
+    "test": "node --test tests/transaction.test.js tests/night-state.test.mjs tests/recommendation-state.test.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:launch": "node --test tests/launch.test.mjs",
     "test:audio": "node tests/audio.mjs",
     "test:clearing": "node tests/night-clearing.mjs",
+    "test:recommendation": "node tests/night-recommendation.mjs",
     "test:mobile": "node tests/mobile-controls.mjs && node tests/pages-build.mjs"
   },
   "dependencies": {

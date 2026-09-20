@@ -37,7 +37,13 @@ export const shelvingDefinitions = [
     '两只啮合齿轮的转速与齿数成反比。小齿轮带动大齿轮时，输出转速降低，而传递的转矩相应增大。',
     '测量杠杆两端的力臂，可以预测平衡的位置。支点不是力的来源，它改变的是施力的方向与所需的大小。',
   ] },
+  { id: 'night-sky-guide', title: '夜空图鉴', englishTitle: ['A GUIDE TO', 'THE NIGHT SKY'], category: 'science',
+    art: 'sky', coverColor: '#293c60', recommendationTags: ['astronomy', 'science', 'children', 'beginner', 'illustrated'],
+    content: ['月亮不会自己发光，它反射太阳的光。每天看一看，亮的部分在慢慢改变。',
+      '把明亮的星星连起来，就像一把小勺子。找一找，北斗七星在哪里？',
+      '地球和其他行星一起绕着太阳转。太阳是一颗会自己发光的恒星。'] },
 ];
+for (const definition of shelvingDefinitions) definition.recommendationTags ??= [definition.category];
 export const scatteredPositions = [
   [-2.94, .849, -2.42], [-2.68, .058, -2.13], [-1.46, .058, -2.05],
   [.85, .058, -3.45], [3.62, .058, -1.05], [1.95, .058, -.18],
@@ -50,7 +56,7 @@ export class NightShelvingController {
   heldBookId = null;
   result = null;
   constructor() {
-    shelvingDefinitions.forEach((definition, i) => {
+    shelvingDefinitions.slice(0, scatteredPositions.length).forEach((definition, i) => {
       const id = `shelving_${definition.id}`;
       this.taskBookIds.push(id);
       this.books.set(id, { ...new BookInstance(id, definition.id), category: definition.category,
@@ -71,6 +77,10 @@ export class NightShelvingController {
         this.slots.push(slot);
       }
     }
+    const skySlot = this.slots.find(s => s.slotId === 'science_5');
+    skySlot.occupantBookId = 'book_night_sky_guide_001';
+    this.books.set(skySlot.occupantBookId, {...new BookInstance(skySlot.occupantBookId, 'night-sky-guide'),
+      category: 'science', location: {type: 'shelf', shelfId: 'science', slotId: skySlot.slotId}});
   }
   pickup(bookId) {
     const book = this.books.get(bookId);

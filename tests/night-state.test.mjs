@@ -105,7 +105,7 @@ test('reading requires uninterrupted dwell on distinct pages and retains progres
 
 test('shelving permits mistakes, protects occupancy, frees slots and recomputes completion', () => {
   const c = new NightShelvingController();
-  assert.equal(c.books.size, 18);
+  assert.equal(c.books.size, 19);
   assert.equal(c.slots.length, 24);
   const original = c.slots.find(s => s.occupantBookId);
   const first = c.taskBookIds[0];
@@ -124,7 +124,7 @@ test('shelving permits mistakes, protects occupancy, frees slots and recomputes 
   }
   assert.equal(c.isTaskComplete(), true);
   assert.ok(c.result.wrongPlacementCount > 0);
-  assert.equal(c.result.finalPlacements.length, 18);
+  assert.equal(c.result.finalPlacements.length, 19);
   assert.ok(c.result.completedAt);
   assert.equal(c.pickup(original.occupantBookId), true);
   assert.equal(c.isTaskComplete(), false);

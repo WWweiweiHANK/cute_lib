@@ -98,7 +98,7 @@ try {
   await turn(0, .35); await shot('science-shelf');
   await take('shelving_light-machines');
   assert.equal((await state()).slots.find(s => s.slotId === 'science_1').occupantBookId, null);
-  await place('science_5');
+  await place('science_3');
   // Original shelf books are also movable and may be misfiled without judgment.
   await aim('science_0'); await click();
   assert.equal((await state()).heldBookId, 'shelf_science_0');
@@ -135,7 +135,7 @@ try {
   await shot('complete');
   let result = await state();
   assert.equal(result.gamePhase, 'NIGHT_SHELVING_COMPLETE');
-  assert.equal(result.result.finalPlacements.length, 18);
+  assert.equal(result.result.finalPlacements.length, 19);
   assert.equal(result.result.wrongPlacementCount, 2);
   assert.equal(await page.locator('#toast').innerText(), '书都收起来了。');
   assert.doesNotMatch(await page.locator('body').innerText().then(t => t.replace(/NIGHT_SHELVING[\s\S]*/, '')), /正确率|6\s*\/\s*6|整理完美/);

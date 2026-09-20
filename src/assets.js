@@ -576,6 +576,17 @@ export function makeBook(spec = {}) {
       ctx.moveTo(-105, 113);
       ctx.lineTo(105, 113);
       ctx.stroke();
+    } else if (spec.art === 'sky') {
+      ctx.fillStyle = '#d9d5af';
+      ctx.beginPath(); ctx.arc(30, -15, 66, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = spec.coverColor;
+      ctx.beginPath(); ctx.arc(55, -35, 62, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#d9d5af';
+      for (const [x, y, r] of [[-106,-85,7],[-80,25,5],[95,70,7],[120,-75,4],[-20,108,4],[-125,105,3]]) {
+        ctx.beginPath(); ctx.moveTo(x, y-r*2); ctx.lineTo(x+r, y); ctx.lineTo(x,y+r*2); ctx.lineTo(x-r,y); ctx.closePath(); ctx.fill();
+      }
+      ctx.strokeStyle = '#8c9dac';
+      ctx.beginPath(); ctx.ellipse(0, 15, 135, 84, -.25, 0, Math.PI * 2); ctx.stroke();
     } else if (spec.art === "rain") {
       for (let i = 0; i < 7; i++) {
         ctx.strokeRect(-112 + i * 32, 45 - (i % 3) * 27, 24, 80 + (i % 3) * 27);
@@ -669,6 +680,44 @@ export function makeBook(spec = {}) {
         76,
       );
       ctx.fillRect(57, 98, w - 114, 1);
+      if (spec.art === 'sky') {
+        ctx.fillStyle = '#30465b'; ctx.font = '36px Microsoft YaHei';
+        ctx.fillText(['月亮的脸在变', '在星空里找一把勺子', '太阳和它的邻居'][pageIndex], w / 2, 180);
+        ctx.fillStyle = '#344960'; ctx.fillRect(60, 235, 520, 330);
+        const circle = (x, y, r, color) => { ctx.fillStyle = color; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); };
+        ctx.font = '22px Microsoft YaHei';
+        if (pageIndex === 0) {
+          for (let i = 0; i < 4; i++) {
+            const x = 128 + i * 128;
+            circle(x, 370, 43, '#1d2f42');
+            if (i === 2) circle(x, 370, 43, '#e6d9ab');
+            if (i === 1 || i === 3) {
+              ctx.fillStyle = '#e6d9ab'; ctx.beginPath();
+              ctx.arc(x, 370, 43, i === 1 ? -Math.PI/2 : Math.PI/2, i === 1 ? Math.PI/2 : Math.PI*1.5); ctx.closePath(); ctx.fill();
+            }
+            ctx.fillStyle = '#dfd7bd'; ctx.fillText(['新月', '上弦月', '满月', '下弦月'][i], x, 465);
+          }
+        } else if (pageIndex === 1) {
+          const stars = [[112,425],[178,378],[251,398],[329,350],[351,442],[465,456],[491,349]];
+          ctx.strokeStyle = '#aabac6'; ctx.lineWidth = 3; ctx.beginPath();
+          stars.forEach(([x,y],i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y)); ctx.lineTo(329,350); ctx.stroke();
+          for (const [x,y] of stars) circle(x,y,7,'#eee0ac');
+          ctx.fillStyle = '#dfd7bd'; ctx.fillText('北斗七星', 320, 520);
+        } else {
+          const colors = ['#e1b968','#afa491','#c4af85','#7ea5b6','#bd8268'];
+          const names = ['太阳','水星','金星','地球','火星'];
+          for (let i = 0; i < 5; i++) {
+            const x = 128 + i * 98;
+            circle(x,375,[48,10,17,19,14][i],colors[i]);
+            ctx.fillStyle = '#dfd7bd'; ctx.fillText(names[i],x,465);
+          }
+          ctx.font = '16px Microsoft YaHei'; ctx.fillText('示意图：大小和距离未按比例',320,536);
+        }
+        ctx.fillStyle = '#414a40'; ctx.font = '26px Microsoft YaHei'; ctx.textAlign = 'left';
+        (spec.content[pageIndex].match(/.{1,18}/gu) || []).forEach((line,i) => ctx.fillText(line,83,640+i*43));
+        ctx.textAlign = 'center'; ctx.font = '18px Georgia'; ctx.fillText(String(pageIndex+1),320,790);
+        return;
+      }
       if (spec.content) {
         ctx.fillStyle = '#414a40';
         ctx.font = '30px Microsoft YaHei';
