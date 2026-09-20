@@ -26,10 +26,28 @@ import { buildShelvingWorld, moveWalker } from './night-world.js';
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
 const DEV_MODE = query.get("dev") === "1";
+const FORCE_TOUCH_MODE = query.get("touch") === "1";
+let TOUCH_MODE = FORCE_TOUCH_MODE || matchMedia("(pointer: coarse)").matches;
+if (TOUCH_MODE) document.body.classList.add("touch-mode");
 const entryMode = query.get('mode');
 let gamePhase = 'DAY_COUNTER', personalHeld = false, nightHover = null;
 const reading = new ClosingReading(), shelving = new NightShelvingController();
 const keys = new Set();
+const touchMove = { forward: 0, sideways: 0 };
+let touchLook = null;
+window.addEventListener(
+  "pointerdown",
+  (event) => {
+    if (FORCE_TOUCH_MODE || !["mouse", "touch"].includes(event.pointerType)) return;
+    TOUCH_MODE = event.pointerType === "touch";
+    document.body.classList.toggle("touch-mode", TOUCH_MODE);
+    if (!TOUCH_MODE) {
+      touchMove.forward = touchMove.sideways = 0;
+      touchLook = null;
+    }
+  },
+  true,
+);
 const isNight = () => gamePhase.startsWith('NIGHT_');
 const interactionPhase = () => gamePhase === 'DAY_COUNTER' ? tx.phase :
   cameraMode === 'OBJECT_INSPECT' ? 'BOOK_INSPECT' :
@@ -122,7 +140,7 @@ try {
   throw error;
 }
 renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, TOUCH_MODE ? 1 : 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -408,6 +426,7 @@ async function start() {
     .start()
     .catch(() => toast("当前浏览器未启用声音，画面与操作仍可继续。"));
   $("welcome").hidden = true;
+  document.body.classList.add("mobile-playing");
   $("settings").hidden = true;
   $("opening").hidden = false;
   setTimeout(() => ($("opening").hidden = true), 2000);
@@ -1218,14 +1237,45 @@ window.addEventListener("keydown", (event) => {
 });
 window.addEventListener('keyup', event => keys.delete(event.code));
 function requestLook() {
+  if (TOUCH_MODE) return;
   renderer.domElement.requestPointerLock()?.catch(() => toast('点击画面继续环顾。'));
 }
 document.addEventListener('pointerlockchange', () => {
   keys.clear(); press = null; dragging = false; angularX = angularY = 0;
-  if (isNight() && !document.pointerLockElement && started) $('settings').hidden = false;
+  if (!TOUCH_MODE && isNight() && !document.pointerLockElement && started) $('settings').hidden = false;
 });
 window.addEventListener("pointermove", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
+  if (
+    TOUCH_MODE &&
+    event.pointerType === "touch" &&
+    touchLook?.pointerId === event.pointerId
+  ) {
+    const dx = event.clientX - lastX,
+      dy = event.clientY - lastY;
+    if (Math.hypot(event.clientX - touchLook.x, event.clientY - touchLook.y) > 6)
+      touchLook.moved = true;
+    if (interactionPhase() === "BOOK_INSPECT") {
+      dragging = touchLook.moved;
+      angularY = dx * 0.005;
+      angularX = dy * 0.005;
+      book.rotateY(angularY);
+      book.rotateX(angularX);
+    } else if (isNight()) {
+      camera.rotation.y -= dx * 0.002;
+      camera.rotation.x = THREE.MathUtils.clamp(
+        camera.rotation.x - dy * 0.002,
+        -1.35,
+        1.25,
+      );
+    } else {
+      targetYaw = THREE.MathUtils.clamp(targetYaw - dx * 0.002, -MAX_YAW, MAX_YAW);
+      targetPitch = THREE.MathUtils.clamp(targetPitch - dy * 0.002, -MAX_PITCH, MAX_PITCH);
+    }
+    lastX = event.clientX;
+    lastY = event.clientY;
+    return;
+  }
   if (isNight()) {
     if (document.pointerLockElement !== renderer.domElement || busy) return;
     if (cameraMode === 'OBJECT_INSPECT') {
@@ -1272,7 +1322,17 @@ window.addEventListener("pointermove", (event) => {
 renderer.domElement.addEventListener("pointerdown", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
   if (event.button !== 0) return;
-  if (isNight() && document.pointerLockElement !== renderer.domElement) { requestLook(); return; }
+  if (TOUCH_MODE && event.pointerType === "touch") {
+    touchLook = {
+      x: event.clientX,
+      y: event.clientY,
+      moved: false,
+      pointerId: event.pointerId,
+    };
+    lastX = event.clientX;
+    lastY = event.clientY;
+  }
+  if (!TOUCH_MODE && isNight() && document.pointerLockElement !== renderer.domElement) { requestLook(); return; }
   if (interactionPhase() === "BOOK_INSPECT" && !busy) {
     pointer.set(
       (event.clientX / innerWidth) * 2 - 1,
@@ -1291,6 +1351,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
     lastY = event.clientY;
     if (!isNight()) renderer.domElement.setPointerCapture(event.pointerId);
   } else {
+    if (TOUCH_MODE && event.pointerType === "touch") return;
     if (isNight()) { updateNightHover(); guard(nightInteract()); return; }
     pointer.set(
       (event.clientX / innerWidth) * 2 - 1,
@@ -1311,35 +1372,112 @@ renderer.domElement.addEventListener(
 );
 window.addEventListener("pointerup", (event) => {
   if (
-    press &&
-    press.pointerId === event.pointerId &&
-    !dragging &&
-    performance.now() - press.time <= CLICK_TIME_THRESHOLD &&
-    Math.hypot(event.clientX - press.x, event.clientY - press.y) <=
-      CLICK_MOVE_THRESHOLD
+    TOUCH_MODE &&
+    event.pointerType === "touch" &&
+    touchLook?.pointerId === event.pointerId
   ) {
-    pointer.set(
-      (event.clientX / innerWidth) * 2 - 1,
-      1 - (event.clientY / innerHeight) * 2,
-    );
-    const hotspot = damageAtPointer();
-    if (hotspot && hotspot.damageId === press.damageId)
-      guard(selectDamage(hotspot));
+    if (!touchLook.moved && interactionPhase() !== "BOOK_INSPECT") {
+      pointer.set(
+        (event.clientX / innerWidth) * 2 - 1,
+        1 - (event.clientY / innerHeight) * 2,
+      );
+      if (isNight()) {
+        updateNightHover();
+        guard(nightInteract());
+      } else {
+        updateHover();
+        guard(interact());
+      }
+    }
+    touchLook = null;
   }
-  press = null;
-  dragging = false;
+  if (press?.pointerId === event.pointerId) {
+    if (
+      !dragging &&
+      performance.now() - press.time <= CLICK_TIME_THRESHOLD &&
+      Math.hypot(event.clientX - press.x, event.clientY - press.y) <=
+        CLICK_MOVE_THRESHOLD
+    ) {
+      pointer.set(
+        (event.clientX / innerWidth) * 2 - 1,
+        1 - (event.clientY / innerHeight) * 2,
+      );
+      const hotspot = damageAtPointer();
+      if (hotspot && hotspot.damageId === press.damageId)
+        guard(selectDamage(hotspot));
+    }
+    press = null;
+    dragging = false;
+  }
 });
-window.addEventListener("pointercancel", () => {
-  press = null;
-  dragging = false;
-  angularX = angularY = 0;
+window.addEventListener("pointercancel", (event) => {
+  if (touchLook?.pointerId === event.pointerId) touchLook = null;
+  if (press?.pointerId === event.pointerId) {
+    press = null;
+    dragging = false;
+    angularX = angularY = 0;
+  }
 });
 window.addEventListener("blur", () => {
   keys.clear();
+  touchMove.forward = touchMove.sideways = 0;
+  touchLook = null;
   press = null;
   dragging = false;
   angularX = angularY = 0;
 });
+function mobileAction() {
+  if (!started || busy || !$("settings").hidden) return;
+  pointer.set(0, 0);
+  if (isNight()) {
+    updateNightHover();
+    guard(nightInteract());
+  } else {
+    updateHover();
+    guard(interact());
+  }
+}
+function mobileInspect() {
+  if (!started || busy || !$("settings").hidden) return;
+  guard(interactionPhase() === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
+}
+$("mobile-action").addEventListener("click", mobileAction);
+$("mobile-inspect").addEventListener("click", mobileInspect);
+$("mobile-prev").addEventListener("click", () => guard(flip(-1)));
+$("mobile-next").addEventListener("click", () => guard(flip(1)));
+let stickPointer = null;
+function updateStick(event) {
+  const rect = $("mobile-stick").getBoundingClientRect(),
+    dx = event.clientX - (rect.left + rect.width / 2),
+    dy = event.clientY - (rect.top + rect.height / 2),
+    length = Math.hypot(dx, dy),
+    limit = 42,
+    scale = length > limit ? limit / length : 1;
+  touchMove.sideways = (dx * scale) / limit;
+  touchMove.forward = (-dy * scale) / limit;
+  $("mobile-stick").firstElementChild.style.transform =
+    `translate(${dx * scale}px, ${dy * scale}px)`;
+}
+$("mobile-stick").addEventListener("pointerdown", (event) => {
+  stickPointer = event.pointerId;
+  try {
+    $("mobile-stick").setPointerCapture(event.pointerId);
+  } catch {
+    // Synthetic and older touch implementations can omit an active capture target.
+  }
+  updateStick(event);
+});
+$("mobile-stick").addEventListener("pointermove", (event) => {
+  if (event.pointerId === stickPointer) updateStick(event);
+});
+function releaseStick(event) {
+  if (event.pointerId !== stickPointer) return;
+  stickPointer = null;
+  touchMove.forward = touchMove.sideways = 0;
+  $("mobile-stick").firstElementChild.style.transform = "translate(0, 0)";
+}
+$("mobile-stick").addEventListener("pointerup", releaseStick);
+$("mobile-stick").addEventListener("pointercancel", releaseStick);
 window.addEventListener("resize", () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -1537,9 +1675,10 @@ function frame(now) {
   }
   if (isNight()) {
     if (gamePhase === 'NIGHT_FREE_ROAM' && shelving.getPendingBooks().length) gamePhase = 'NIGHT_SHELVING';
-    if (!busy && cameraMode === 'FREE_LOOK' && $('settings').hidden && document.pointerLockElement) {
-      const forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS'));
-      const sideways = Number(keys.has('KeyD')) - Number(keys.has('KeyA'));
+    if (!busy && cameraMode === 'FREE_LOOK' && $('settings').hidden &&
+        (TOUCH_MODE || document.pointerLockElement)) {
+      const forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS')) + touchMove.forward;
+      const sideways = Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + touchMove.sideways;
       const moving = moveWalker(camera.position, camera.rotation.y, forward, sideways, dt);
       if (moving && time > nextFootstep) {
         audio.tone(115, .09, .014);
@@ -1573,6 +1712,14 @@ function frame(now) {
     angularX *= decay;
   }
   grain.uniforms.uTime.value = time;
+  if (TOUCH_MODE && started) {
+    const inspecting = interactionPhase() === "BOOK_INSPECT",
+      held = personalHeld || shelving.heldBookId || tx.phase === "BOOK_HELD" || tx.phase === "RETURN_BOOK_HELD";
+    $("mobile-stick").hidden = $("mobile-action").hidden = !isNight();
+    $("mobile-inspect").disabled = !held && !inspecting;
+    $("mobile-prev").hidden = $("mobile-next").hidden = !inspecting;
+    $("mobile-action").textContent = nightHover || hover ? "使用" : "观察";
+  }
   scene.updateMatrixWorld();
   updateCardFields();
   updateHover();

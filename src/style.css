@@ -28,6 +28,8 @@ body {
   height: 100%;
   overflow: hidden;
   background: #10191d;
+  touch-action: none;
+  overscroll-behavior: none;
 }
 button {
   font: inherit;
@@ -639,6 +641,87 @@ footer {
   margin-top: 12px;
 }
 .case-select { flex-wrap: wrap; }
+#mobile-controls {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#mobile-stick {
+  position: absolute;
+  left: max(24px, env(safe-area-inset-left));
+  bottom: max(22px, env(safe-area-inset-bottom));
+  width: 112px;
+  height: 112px;
+  border: 1px solid #d5c19144;
+  border-radius: 50%;
+  background: #101a1b55;
+  pointer-events: auto;
+  touch-action: none;
+}
+#mobile-stick span {
+  position: absolute;
+  left: 34px;
+  top: 34px;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #d1bd8c66;
+  border: 1px solid #e5d3a877;
+  transform: translate(0, 0);
+}
+.mobile-actions {
+  position: absolute;
+  right: max(20px, env(safe-area-inset-right));
+  bottom: max(20px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: 48px 48px 58px;
+  grid-template-rows: 44px 56px;
+  gap: 9px;
+  align-items: end;
+  pointer-events: auto;
+}
+.mobile-actions button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #d2bd8a66;
+  border-radius: 50%;
+  color: #eadfc7;
+  background: #152220cc;
+  backdrop-filter: blur(4px);
+  touch-action: manipulation;
+}
+#mobile-action {
+  grid-column: 3;
+  grid-row: 1 / 3;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+}
+#mobile-inspect { grid-column: 2; grid-row: 2; }
+#mobile-prev { grid-column: 1; grid-row: 1; }
+#mobile-next { grid-column: 2; grid-row: 1; }
+#rotate-phone {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  place-items: center;
+  background: #10191d;
+  color: #d9ccb0;
+  font-size: 15px;
+  letter-spacing: 2px;
+}
+body.touch-mode.mobile-playing #mobile-controls { display: block !important; }
+@media (orientation: portrait) and (pointer: coarse) {
+  body.touch-mode #rotate-phone { display: grid !important; }
+}
+@media (pointer: coarse) {
+  #interact,
+  #inspect-help { display: none !important; }
+  #settings { right: 16px; bottom: 16px; max-width: calc(100% - 32px); }
+}
 @keyframes brief-fade {
   0%,
   100% {

@@ -6,12 +6,13 @@
   "scripts": {
     "start": "node tools/launch.mjs",
     "dev": "vite --host 127.0.0.1 --port 5178 --strictPort",
-    "build": "vite build",
+    "build": "vite build --base=./",
     "preview": "vite preview --host 127.0.0.1 --port 5178 --strictPort",
     "test": "node --test tests/transaction.test.js tests/night-state.test.mjs",
     "test:browser": "node tests/browser.mjs",
     "test:launch": "node --test tests/launch.test.mjs",
-    "test:audio": "node tests/audio.mjs"
+    "test:audio": "node tests/audio.mjs",
+    "test:mobile": "node tests/mobile-controls.mjs && node tests/pages-build.mjs"
   },
   "dependencies": {
     "three": "0.180.0"

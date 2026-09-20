@@ -47,9 +47,10 @@ export class LibraryAudio {
     humGain.gain.value = 0.003;
     hum.connect(humGain).connect(this.ambience);
     hum.start();
+    const audioRoot = new URL("audio/", document.baseURI);
     this.loading = Promise.allSettled([
-      this.loadLayer("/audio/indoor-rain-508962.mp3", 0.12, 1550, 47, -0.08),
-      this.loadLayer("/audio/room-tone-192529.mp3", 0.075, 620, 71, 0.08),
+      this.loadLayer(new URL("indoor-rain-508962.mp3", audioRoot), 0.12, 1550, 47, -0.08),
+      this.loadLayer(new URL("room-tone-192529.mp3", audioRoot), 0.075, 620, 71, 0.08),
     ]).then((results) => {
       if (results.some((result) => result.status === "fulfilled")) {
         gain.gain.setTargetAtTime(0, c.currentTime, 1.5);
