@@ -625,6 +625,7 @@ async function putBack() {
 async function inspectAgain() {
   if (gamePhase === 'DAY_COUNTER' ? !tx.dispatch('INSPECT_AGAIN') : interactionPhase() !== 'BOOK_HELD') return;
   busy = true;
+  book.userData.preparePages();
   cameraMode = "OBJECT_INSPECT";
   updateUI();
   audio.paper();
@@ -801,6 +802,7 @@ function enterNight() {
   inspectionLight.position.set(0, .18, -.35);
   inspectionLight.intensity = 1.5;
   inspectionLight.distance = 2.4;
+  inspectionLight.layers.set(1); // Paper fill belongs to held objects, not a headlamp on nearby shelves.
   keys.clear();
   busy = false;
   clearingWorld.group.visible = true;
@@ -1388,6 +1390,7 @@ window.addEventListener("keydown", (event) => {
     guard(interactionPhase() === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
 });
 window.addEventListener('keyup', event => keys.delete(event.code));
+document.addEventListener('visibilitychange', () => reading.update(0, 0));
 function requestLook() {
   if (TOUCH_MODE) return;
   renderer.domElement.requestPointerLock()?.catch(() => toast('点击画面继续环顾。'));
@@ -1756,7 +1759,8 @@ if (DEV_MODE) {
 }
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  const elapsed = (now - lastTime) / 1000;
+  const dt = Math.min(elapsed, 0.05);
   lastTime = now;
   time += dt;
   for (let i = animations.length - 1; i >= 0; i--) {
@@ -1823,8 +1827,8 @@ function frame(now) {
     camera.position.y = 1.67 + Math.sin(time * 0.8) * 0.0009;
   }
   if (gamePhase === 'CLOSING_READING') {
-    const page = cameraMode === 'OBJECT_INSPECT' && !busy && $('settings').hidden && !dragging ? bookPage : 0;
-    if (reading.update(page, dt)) {
+    const page = cameraMode === 'OBJECT_INSPECT' && !busy && $('settings').hidden && !dragging && !document.hidden ? bookPage : 0;
+    if (reading.update(page, Math.min(elapsed, .25))) {
       const clock = document.querySelector('.clock');
       clock.textContent = reading.time;
       clock.animate([{opacity: .3}, {opacity: 1}], {duration: 600});

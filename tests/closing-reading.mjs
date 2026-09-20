@@ -17,6 +17,10 @@ async function pickup() {
 }
 async function flip(direction = 1) { await page.mouse.wheel(0, direction * 100); await page.waitForTimeout(100); await ready(); }
 try {
+  if (process.env.SLOW_FRAME_MS) await page.addInitScript(delay => {
+    const raf = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = callback => raf(() => setTimeout(() => callback(performance.now()), delay));
+  }, Number(process.env.SLOW_FRAME_MS));
   await page.goto((process.env.NIGHTFALL_URL || 'http://127.0.0.1:5178') + '/?dev=1&mode=closing');
   await page.locator('#start').click();
   await page.waitForFunction(() => window.library?.night.gamePhase === 'CLOSING_READING');

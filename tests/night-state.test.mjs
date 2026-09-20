@@ -1,9 +1,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ClosingReading } from '../src/closing-reading.js';
-import { NightShelvingController } from '../src/night-shelving.js';
+import { NightShelvingController, shelfCategories, shelvingDefinitions } from '../src/night-shelving.js';
 import { NightClearingController } from '../src/night-clearing.js';
 import { canWalk } from '../src/night-world.js';
+
+test('rear shelves are densely stocked with distinct readable titles and reachable gaps', () => {
+  const c = new NightShelvingController();
+  const definitions = [...c.books.values()].map(b => shelvingDefinitions.find(d => d.id === b.definitionId));
+  assert.equal(new Set(definitions.map(d => d.title)).size, definitions.length, 'no duplicate shelf titles');
+  assert.equal(new Set(definitions.map(d => d.content.join(''))).size, definitions.length, 'no duplicate interiors');
+  for (const shelf of shelfCategories) {
+    assert.ok(shelf.position[2] > 2.8, 'shelves behind the seated player');
+    assert.ok(canWalk(shelf.position[0], shelf.position[2] - .8), 'front aisle accessible');
+    const slots = c.slots.filter(s => s.shelfId === shelf.id);
+    assert.ok(slots.filter(s => s.occupantBookId).length / slots.length >= .75, 'mostly full before tidying');
+    const row = slots.filter(s => s.localPosition[1] < 1).sort((a,b) => a.localPosition[0]-b.localPosition[0]);
+    for (let i=1;i<row.length;i++) assert.ok(row[i].localPosition[0]-row[i-1].localPosition[0] < .2, 'no wide artificial gaps');
+  }
+});
 
 test('readers merging at the entrance cannot permanently block each other', () => {
   const c = new NightClearingController();
@@ -105,8 +120,8 @@ test('reading requires uninterrupted dwell on distinct pages and retains progres
 
 test('shelving permits mistakes, protects occupancy, frees slots and recomputes completion', () => {
   const c = new NightShelvingController();
-  assert.equal(c.books.size, 19);
-  assert.equal(c.slots.length, 24);
+  assert.equal(c.books.size, 43);
+  assert.equal(c.slots.length, 48);
   const original = c.slots.find(s => s.occupantBookId);
   const first = c.taskBookIds[0];
   assert.equal(c.pickup(first), true);
@@ -124,7 +139,7 @@ test('shelving permits mistakes, protects occupancy, frees slots and recomputes 
   }
   assert.equal(c.isTaskComplete(), true);
   assert.ok(c.result.wrongPlacementCount > 0);
-  assert.equal(c.result.finalPlacements.length, 19);
+  assert.equal(c.result.finalPlacements.length, 43);
   assert.ok(c.result.completedAt);
   assert.equal(c.pickup(original.occupantBookId), true);
   assert.equal(c.isTaskComplete(), false);

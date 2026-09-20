@@ -81,12 +81,13 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
   function shelf(x, z, width = 1.65, height = 2.62, category) {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
+    group.rotation.y = Math.PI;
     scene.add(group);
     sortingShelves.set(category.id, group);
     // A small, fixed shelf lamp lights the spines and labels without lifting the whole room.
     box(group, [.6, .035, .12], [0, 2.4, .35], trim);
     box(group, [.48, .008, .09], [0, 2.378, .35], material('#c9b488', {emissive: '#d8b882', emissiveIntensity: .65}));
-    const shelfLight = new THREE.PointLight('#e5cca6', 1.8, 3.5, 2);
+    const shelfLight = new THREE.PointLight('#e5cca6', 1.3, 3.2, 2);
     shelfLight.position.set(0, 2.23, 1.02);
     group.add(shelfLight);
     dimLights.push([shelfLight, shelfLight.intensity]);
@@ -120,7 +121,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
       }),
     );
   }
-  shelfCategories.forEach(c => shelf(c.position[0], c.position[2], 1.65, 2.16, c));
+  shelfCategories.forEach(c => shelf(c.position[0], c.position[2], 1.14, 2.16, c));
   // Empty reading corner: secondary warmth, not another focal point.
   box(scene, [1.42, 0.085, 0.78], [-2.55, 0.76, -2.45], walnut);
   for (const x of [-3.1, -2])
@@ -484,21 +485,6 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     }),
   );
   scene.add(rain);
-  const glassStreaks = canvasTexture(512, 512, (ctx, w, h) => {
-    const r = seeded(9);
-    ctx.strokeStyle = "#c6d5dd";
-    for (let i = 0; i < 110; i++) {
-      ctx.globalAlpha = 0.035 + r() * 0.12;
-      ctx.lineWidth = 0.4 + r() * 0.8;
-      const x = r() * w,
-        y = r() * h;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - 2, y + 12 + r() * 58);
-      ctx.stroke();
-    }
-  });
-  plane(scene, 6.85, 2.8, [0, 1.95, -4.18], glassStreaks, null, true);
   // Sources correspond to visible fixtures; only the work light casts dynamic shadows.
   scene.add(new THREE.HemisphereLight("#8b9caa", "#3b3020", 0.26));
   const key = new THREE.SpotLight("#ffd3a0", 11, 8, Math.PI / 3, 0.75, 1.5);

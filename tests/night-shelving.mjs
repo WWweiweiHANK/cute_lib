@@ -18,6 +18,8 @@ async function turn(yaw, pitch = -.12) {
   await page.waitForTimeout(100);
 }
 async function aim(id) {
+  const location = (await state()).books.find(b => b.instanceId === id)?.location;
+  if (location?.type === 'shelf') id = location.slotId;
   const at = await page.evaluate(id => window.library.nightPosition(id), id);
   const {position: [x, y, z]} = await state();
   await turn(Math.atan2(x - at[0], z - at[2]), Math.atan2(at[1] - y, Math.hypot(at[0] - x, at[2] - z)));
@@ -36,6 +38,14 @@ async function walk(x, z) {
   throw Error(`Unable to walk to ${x}, ${z}: ${JSON.stringify((await state()).position)}`);
 }
 async function click() { await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(80); await ready(); }
+async function shelf(x) {
+  if ((await state()).position[2] < 2.3) await walk(3.15, -1.3);
+  await walk(3.15, 2.75); await walk(x, 2.75);
+}
+async function floor(x, z) {
+  if ((await state()).position[2] > 2.3) { await walk(3.15, 2.75); await walk(3.15, -1.3); }
+  await walk(x, -1.3); await walk(x, z);
+}
 async function take(id) {
   await aim(id);
   await click();
@@ -91,11 +101,11 @@ try {
   await page.keyboard.press('r'); await ready();
   assert.equal((await state()).cameraMode, 'FREE_LOOK');
   assert.equal((await state()).pointerLocked, true);
-  await walk(3.15, -1.25); await walk(3.15, 1.5); await walk(4.4, 1.5);
+  await shelf(2.1);
   await aim('science_0'); await click();
   assert.equal((await state()).heldBookId, 'shelving_light-machines', 'occupied slot does not swap');
   await place('science_1');
-  await turn(0, .35); await shot('science-shelf');
+  await turn(Math.PI, -.3); await shot('science-shelf');
   await take('shelving_light-machines');
   assert.equal((await state()).slots.find(s => s.slotId === 'science_1').occupantBookId, null);
   await place('science_3');
@@ -104,9 +114,9 @@ try {
   assert.equal((await state()).heldBookId, 'shelf_science_0');
   await place('science_1');
   console.log('PASS: reach, counter collision, pickup, R/drag/pages/pointer lock, occupied slot, two heights, original books.');
-  await walk(3.15, 1.5); await walk(3.15, -1.3); await walk(3.65, -1.55);
+  await floor(3.65, -1.55);
   await take('shelving_woodland-notes');
-  await walk(3.1, -1.3); await walk(-4, -1.3); await walk(-4, -1.6);
+  await shelf(-2.1);
   await place('literature_1'); // deliberately wrong, silently accepted
   await shot('wrong-category');
   assert.equal(await page.locator('#complete').isVisible(), false);
@@ -115,27 +125,27 @@ try {
     await turn(Math.atan2(x, z - 1.2), Math.atan2(1.2 - y, Math.hypot(x, z - 1.2)));
     await shot('counter-from-shelves'); }
   // Reading table and beneath it are reachable from its open front edge.
-  await walk(-2.75, -1.45); await aim('shelving_distant-lighthouse'); await shot('reading-area');
+  await floor(-2.75, -1.45); await aim('shelving_distant-lighthouse'); await shot('reading-area');
   await take('shelving_distant-lighthouse');
   await aim('shelving_before-rain-ends'); await click();
   assert.equal((await state()).heldBookId, 'shelving_distant-lighthouse', 'one book at a time');
-  await walk(-4, -1.45); await place('literature_3');
-  await walk(-2.68, -1.45); await take('shelving_before-rain-ends');
-  await walk(-4, -1.45); await place('literature_5');
-  await walk(-1.25, -1.4);
+  await shelf(-2.1); await place('literature_3');
+  await floor(-2.68, -1.45); await take('shelving_before-rain-ends');
+  await shelf(-2.1); await place('literature_5');
+  await floor(-1.25, -1.4);
   await aim('elder'); await click();
   assert.equal((await state()).clearing.hoveredVisitor, undefined);
   assert.equal((await state()).clearing.dialogueTarget, null, 'shelving does not enable reminders');
   await take('shelving_harbour-years');
-  await walk(3.1, -1.4); await walk(4, -1.65); await place('history_1');
+  await shelf(-.7); await place('history_1');
   await shot('history-shelf');
-  await walk(1, -1.4); await walk(.85, -2.75); await take('shelving_old-city-archive');
-  await walk(.85, -1.4); await walk(-3.06, -1.4); await walk(-3.06, 1.7); await walk(-4.2, 1.7);
+  await floor(.85, -2.75); await take('shelving_old-city-archive');
+  await shelf(.7);
   await place('nature_3'); // deliberately wrong, completion must still occur
   await shot('complete');
   let result = await state();
   assert.equal(result.gamePhase, 'NIGHT_SHELVING_COMPLETE');
-  assert.equal(result.result.finalPlacements.length, 19);
+  assert.equal(result.result.finalPlacements.length, 43);
   assert.equal(result.result.wrongPlacementCount, 2);
   assert.equal(await page.locator('#toast').innerText(), '书都收起来了。');
   assert.doesNotMatch(await page.locator('body').innerText().then(t => t.replace(/NIGHT_SHELVING[\s\S]*/, '')), /正确率|6\s*\/\s*6|整理完美/);

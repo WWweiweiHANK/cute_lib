@@ -9,7 +9,7 @@ export const walkObstacles = [
   [-3.55, -3.15, -2.5, -1.95], [-2.02, -1.62, -2.5, -1.95], // chairs
   [-.76, -.34, -3.66, -3.24], // window reading stool
   [-3.7, -3.2, -3.8, -3.3], [3.23, 3.73, -3.75, -3.25], // plants
-  ...shelfCategories.map(c => [c.position[0] - .88, c.position[0] + .88, c.position[2] - .24, c.position[2] + .3]),
+  ...shelfCategories.map(c => [c.position[0] - .64, c.position[0] + .64, c.position[2] - .3, c.position[2] + .24]),
 ];
 export function canWalk(x, z) {
   const r = .21;
@@ -35,14 +35,15 @@ export function buildShelvingWorld(scene, shelves, controller) {
   for (const slot of controller.slots) {
     const group = shelves.get(slot.shelfId);
     // Aim at the actual gap, including its height and left/right position.
-    const target = box(group, [.43, .75, .02], [slot.localPosition[0], slot.localPosition[1] + .08, .34], proxy);
+    const target = box(group, [.17, .62, .02], [slot.localPosition[0], slot.localPosition[1], .34], proxy);
     target.castShadow = target.receiveShadow = false;
     target.userData.slotId = slot.slotId;
     slotTargets.push(target);
   }
   for (const data of controller.books.values()) {
     const definition = shelvingDefinitions.find(d => d.id === data.definitionId);
-    const model = makeBook(definition);
+    const model = makeBook({...definition, deferPages: true});
+    model.scale.z = 1.7;
     model.userData.shelvingBookId = data.instanceId;
     books.set(data.instanceId, model);
     if (data.location.type === 'shelf') {

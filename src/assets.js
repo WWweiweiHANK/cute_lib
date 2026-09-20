@@ -539,21 +539,39 @@ export function makeBook(spec = {}) {
     ctx.fillRect(0, 0, w, h);
     ctx.strokeStyle = "#b3a16f";
     ctx.lineWidth = 3;
-    ctx.strokeRect(32, 32, w - 64, h - 64);
-    ctx.lineWidth = 1;
-    ctx.strokeRect(43, 43, w - 86, h - 86);
+    if (spec.coverStyle === 1) {
+      ctx.fillStyle = '#d0c09b'; ctx.globalAlpha = .17; ctx.fillRect(0, 138, w, 242); ctx.globalAlpha = 1;
+      ctx.fillRect(50, 740, 76, 4);
+    } else if (spec.coverStyle === 2) {
+      ctx.fillStyle = '#101e2438'; ctx.fillRect(48, 407, w - 96, 255);
+      ctx.strokeRect(48, 407, w - 96, 255);
+    } else if (spec.coverStyle === 3) {
+      ctx.fillStyle = '#b3a16f'; ctx.fillRect(26, 40, 8, h - 80);
+      ctx.fillRect(55, 392, w - 110, 2);
+    } else {
+      ctx.strokeRect(32, 32, w - 64, h - 64);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(43, 43, w - 86, h - 86);
+    }
     ctx.fillStyle = "#c7b687";
     ctx.textAlign = "center";
     ctx.font = "17px Georgia";
     ctx.fillText(spec.personal ? "" : "THE NIGHTFALL COLLECTION", w / 2, 93);
     ctx.font = "52px Georgia";
-    ctx.fillText(spec.englishTitle?.[0] || "THE MIDNIGHT", w / 2, 205);
+    ctx.fillText(spec.englishTitle?.[0] || "THE MIDNIGHT", w / 2, 205, w - 100);
     ctx.font = spec.englishTitle ? "52px Georgia" : "70px Georgia";
-    ctx.fillText(spec.englishTitle?.[1] || "ATLAS", w / 2, 290);
+    ctx.fillText(spec.englishTitle?.[1] || "ATLAS", w / 2, 290, w - 100);
     ctx.font = "24px Microsoft YaHei";
     ctx.fillText(spec.title || "午 夜 图 谱", w / 2, 346);
     ctx.save();
     ctx.translate(w / 2, 523);
+    if (spec.coverSeed) {
+      const random = seeded(spec.coverSeed * 97);
+      ctx.translate((random() - .5) * 55, (random() - .5) * 25);
+      const scale = .7 + random() * .22;
+      ctx.scale(scale, scale);
+      ctx.lineWidth = 2 + random() * 3;
+    }
     ctx.strokeStyle = "#b6a271";
     if (spec.art === "lighthouse") {
       ctx.lineWidth = 3;
@@ -652,7 +670,8 @@ export function makeBook(spec = {}) {
     }
     ctx.restore();
     ctx.font = "20px Georgia";
-    ctx.fillText("E L I A S   W R E N", w / 2, 742);
+    ctx.font = spec.author ? '24px Microsoft YaHei' : '20px Georgia';
+    ctx.fillText(spec.author || "E L I A S   W R E N", w / 2, 742);
   });
   const front = plane(pivot, 0.438, 0.575, [0.222, 0, 0.0076], cover);
   plane(
@@ -667,7 +686,7 @@ export function makeBook(spec = {}) {
     }),
     [0, Math.PI, 0],
   );
-  const pages = Array.from({length: spec.content?.length || 3}, (_, i) => i).map((pageIndex) =>
+  const buildPages = () => Array.from({length: spec.content?.length || 3}, (_, i) => i).map((pageIndex) =>
     canvasTexture(640, 840, (ctx, w, h) => {
       ctx.fillStyle = "#dfd4b7";
       ctx.fillRect(0, 0, w, h);
@@ -791,15 +810,23 @@ export function makeBook(spec = {}) {
       );
     }),
   );
+  const pages = spec.deferPages ? [] : buildPages();
   root.userData.pages = pages;
-  root.userData.page = plane(root, 0.407, 0.545, [0, 0, 0.0305], pages[0]);
+  root.userData.page = plane(root, 0.407, 0.545, [0, 0, 0.0305], pages[0] || null);
+  // Shelf interiors only allocate textures when that book is actually inspected.
+  root.userData.preparePages = () => {
+    if (pages.length) return;
+    pages.push(...buildPages());
+    root.userData.page.material.map = pages[0];
+    root.userData.page.material.needsUpdate = true;
+  };
   plane(
     root,
     0.438,
     0.577,
     [0, 0, -0.048],
     textTexture(
-      [
+      spec.content ? [spec.title, '', spec.content[0].slice(0, 16), spec.content[0].slice(16, 32), '', spec.author || '夜阑藏书'] : [
         "NIGHTFALL PRESS",
         "",
         "A map for the hours",
@@ -807,7 +834,7 @@ export function makeBook(spec = {}) {
         "",
         "0147 / ARCHIVES",
       ],
-      { bg: "#233f3d", size: 29 },
+      { bg: spec.coverColor || "#233f3d", size: spec.content ? 23 : 29 },
     ),
     [0, Math.PI, 0],
   );
@@ -821,14 +848,15 @@ export function makeBook(spec = {}) {
     });
     plane(root, .088, .57, [-.235, 0, 0], spine, [0, -Math.PI / 2, 0]);
   }
-  root.userData.cleanPages = [cover, ...pages].map((texture) => {
+  root.userData.cleanPages = spec.deferPages ? [] : [cover, ...pages].map((texture) => {
     const canvas = document.createElement("canvas");
     canvas.width = texture.image.width;
     canvas.height = texture.image.height;
     canvas.getContext("2d").drawImage(texture.image, 0, 0);
     return canvas;
   });
-  updateBookDamage(root, damages);
+  if (!spec.deferPages) updateBookDamage(root, damages);
+  else root.userData.damageHotspots = [];
   return root;
 }
 export function updateBookDamage(root, damages) {

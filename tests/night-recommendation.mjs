@@ -27,6 +27,8 @@ async function turn(yaw, pitch = -.12) {
   await page.waitForTimeout(90);
 }
 async function aim(id) {
+  const location = (await state()).books.find(b => b.instanceId === id)?.location;
+  if (location?.type === 'shelf') id = location.slotId; // Aim at the exposed spine, not behind neighboring books.
   const at = await page.evaluate(id => window.library.nightPosition(id),id);
   const {position:[x,y,z]} = await state();
   await turn(Math.atan2(x-at[0],z-at[2]), Math.atan2(at[1]-y,Math.hypot(x-at[0],z-at[2])));
@@ -63,8 +65,9 @@ async function place(id) {
   await aim(id); assert.equal((await state()).hoveredSlot?.slotId,id);
   await click(); await ready(); assert.equal((await state()).heldBookId,null);
 }
-async function door() { await walk(3.15,-1.35); await walk(2.85,-3.2); await aim('chen_yao'); }
-async function science() { await walk(3.15,-1.35); await walk(3.15,1.5); await walk(4.4,1.5); }
+async function door() { if ((await state()).position[2]>2.3) await walk(3.15,2.75); await walk(3.15,-1.35); await walk(2.85,-3.2); await aim('chen_yao'); }
+async function shelf(x) { if ((await state()).position[2]<2.3) await walk(3.15,-1.35); await walk(3.15,2.75); await walk(x,2.75); }
+async function science() { await shelf(2.1); }
 async function shot(name) {
   await page.locator('#dev-panel').evaluate(el => el.style.visibility='hidden');
   await page.screenshot({path:`artifacts/recommendation-${mobile?'mobile':'desktop'}-${name}.png`});
@@ -125,7 +128,7 @@ try {
     }
     const id=route==='wrong'?'shelf_nature_0':'book_night_sky_guide_001';
     if (route==='wrong') {
-      await walk(0,-1.35); await walk(-3.08,-1.35); await walk(-3.08,1.7); await walk(-4.2,1.7);
+      await shelf(.7);
     } else await science();
     await take(id); await inspect();
     assert.equal((await state()).cameraMode,'OBJECT_INSPECT');
@@ -137,7 +140,6 @@ try {
       await shot(`page-${i}`);
     }
     await inspect();
-    if(route==='wrong'){await walk(-3.08,1.7);await walk(-3.08,-1.35);}
     await door();
     assert.equal((await state()).recommendation.knocks,3,'no repeated knocking while searching');
     await shot('holding');
@@ -154,7 +156,7 @@ try {
     assert.equal((await state()).heldBookId,id,'visitor cannot take library book');
     assert.equal((await state()).gamePhase,'NIGHT_RECOMMENDATION_PRESENT','held book blocks completion');
     assert.equal((await state()).recommendation.hovered,false);
-    await walk(3.15,-1.35); await walk(4,-1.65);
+    await shelf(-.7);
     await place('history_5'); // wrong shelf accepted without feedback
     await page.waitForFunction(() => window.library.night.gamePhase==='NIGHT_RECOMMENDATION_COMPLETE');
     assert.equal((await state()).result.finalPlacements.find(p=>p.bookId===id).isCorrect,false);
