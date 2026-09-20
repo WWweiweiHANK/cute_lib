@@ -1,6 +1,8 @@
 # 闭馆清场：巡视、发现滞留读者与劝离
 
-**状态：设计需求 / 待实现**
+**状态：已实现（2026-09-20）**
+
+实现接入既有夜间整理：完成后等待 2 秒进入清场，三位读者提前存在于整理场景；1.8m 内空手瞄准提醒，沿用鼠标/手机输入与站立视角。全部真实离场后等待 1.5 秒并显示 1.5 秒确认字幕，保留自由行走。入口 `?mode=clearing`；规则与实际参数见 README「闭馆清场」和 `docs/INTERACTION_FLOWS.md` 第 11 节。测试为 `tests/night-clearing.mjs` 和 `tests/night-state.test.mjs`，未接入下一阶段或持久化清场存档。
 
 **对应项目：Nightfall Library / cute_lib**
 

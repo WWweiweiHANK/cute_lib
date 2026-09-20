@@ -12,6 +12,7 @@
     "test:browser": "node tests/browser.mjs",
     "test:launch": "node --test tests/launch.test.mjs",
     "test:audio": "node tests/audio.mjs",
+    "test:clearing": "node tests/night-clearing.mjs",
     "test:mobile": "node tests/mobile-controls.mjs && node tests/pages-build.mjs"
   },
   "dependencies": {

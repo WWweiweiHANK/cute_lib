@@ -44,25 +44,27 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     metalness: 0.05,
     depthWrite: false,
   });
-  box(scene, [7, 3.25, 0.025], [0, 1.77, -4.48], glass).castShadow = false;
+  box(scene, [5.85, 3.25, 0.025], [-.575, 1.77, -4.48], glass).castShadow = false;
   for (const x of [-3.5, -2.32, -1.16, 0, 1.16, 2.32, 3.5])
     box(scene, [0.085, 3.02, 0.17], [x, 1.96, -4.31], trim);
   for (const y of [0.15, 1.14, 3.39])
-    box(scene, [7.15, 0.075, 0.16], [0, y, -4.3], trim);
+    box(scene, [y === 3.39 ? 7.15 : 5.85, 0.075, 0.16], [y === 3.39 ? 0 : -.575, y, -4.3], trim);
   // A real pivoting glass entrance in the right-hand window bay.
   const door = new THREE.Group();
-  door.position.set(2.35, 0.52, -4.21);
+  door.position.set(2.35, 0, -4.21);
   scene.add(door);
   for (const x of [0, 1.08])
-    box(door, [0.065, 2.81, 0.1], [x, 1.405, 0], walnut);
-  for (const y of [0, 2.81])
+    box(door, [0.065, 3.33, 0.1], [x, 1.665, 0], walnut);
+  for (const y of [0.04, 3.33])
     box(door, [1.15, 0.065, 0.1], [0.54, y, 0], walnut);
-  box(door, [0.04, 0.43, 0.04], [0.9, 1.18, 0.095], brass);
+  box(door, [1.02, 3.2, .025], [.54, 1.665, -.012], glass).castShadow = false;
+  box(door, [0.04, 0.43, 0.04], [0.9, 1.7, 0.095], brass);
+  box(door, [.72, .045, .06], [.54, 1.05, .09], brass);
   const doorSign = plane(
     door,
     0.36,
     0.2,
-    [0.54, 1.8, 0.062],
+    [0.54, 2.32, 0.062],
     textTexture(["OPEN LATE"], {
       w: 512,
       h: 256,
@@ -542,6 +544,8 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
     mat,
     sortingShelves,
     closed: false,
+    lockedFromOutside: false,
+    canExitFromInside: true,
     setReadingProgress(progress) {
       dimLights.forEach(([light, intensity]) => light.intensity = intensity * (1 - .05 * progress));
     },
@@ -550,6 +554,7 @@ export function buildEnvironment(scene, { returnMode = false } = {}) {
         doorSign.material.map.dispose();
         doorSign.material.map = textTexture(['CLOSED'], {w: 512, h: 256, bg: '#283f37', ink: '#c7b68a', size: 48});
         this.closed = true;
+        this.lockedFromOutside = true;
       }
       dimLights.forEach(([light, intensity]) => light.intensity = intensity * (1 - .2 * amount));
     },

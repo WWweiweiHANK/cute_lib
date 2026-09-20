@@ -7,6 +7,7 @@ export const walkObstacles = [
   [-2.725, 2.725, .4, 2.22], // counter
   [-3.26, -1.84, -2.84, -2.06], // reading table
   [-3.55, -3.15, -2.5, -1.95], [-2.02, -1.62, -2.5, -1.95], // chairs
+  [-.76, -.34, -3.66, -3.24], // window reading stool
   [-3.7, -3.2, -3.8, -3.3], [3.23, 3.73, -3.75, -3.25], // plants
   ...shelfCategories.map(c => [c.position[0] - .88, c.position[0] + .88, c.position[2] - .24, c.position[2] + .3]),
 ];
@@ -16,15 +17,15 @@ export function canWalk(x, z) {
     !walkObstacles.some(([left, right, back, front]) =>
       x > left - r && x < right + r && z > back - r && z < front + r);
 }
-export function moveWalker(position, yaw, forward, sideways, dt) {
+export function moveWalker(position, yaw, forward, sideways, dt, blocked = () => false) {
   const length = Math.hypot(forward, sideways);
   if (!length) return false;
   const speed = 1.45 * Math.min(dt, .05) / length;
   const dx = (Math.cos(yaw) * sideways - Math.sin(yaw) * forward) * speed;
   const dz = (-Math.cos(yaw) * forward - Math.sin(yaw) * sideways) * speed;
   const oldX = position.x, oldZ = position.z;
-  if (canWalk(position.x + dx, position.z)) position.x += dx;
-  if (canWalk(position.x, position.z + dz)) position.z += dz;
+  if (canWalk(position.x + dx, position.z) && !blocked(position.x + dx, position.z)) position.x += dx;
+  if (canWalk(position.x, position.z + dz) && !blocked(position.x, position.z + dz)) position.z += dz;
   return position.x !== oldX || position.z !== oldZ;
 }
 

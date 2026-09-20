@@ -139,6 +139,13 @@ export class LibraryAudio {
         0.15,
       );
   }
+  setDoorOpen(open) {
+    const rain = this.layers.find(layer => String(layer.url).includes('indoor-rain'));
+    if (rain) {
+      rain.volume.gain.setTargetAtTime(open ? .15 : .12, this.ctx.currentTime, .3);
+      rain.filter.frequency.setTargetAtTime(open ? 2100 : 1550, this.ctx.currentTime, .3);
+    }
+  }
   toggle() {
     this.muted = !this.muted;
     if (this.master)

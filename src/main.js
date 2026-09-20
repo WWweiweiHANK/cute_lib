@@ -22,6 +22,7 @@ import { LibraryAudio } from "./audio.js";
 import { ClosingReading, personalReadingBook } from './closing-reading.js';
 import { NightShelvingController } from './night-shelving.js';
 import { buildShelvingWorld, moveWalker } from './night-world.js';
+import { NightClearingController, buildClearingVisitors } from './night-clearing.js';
 
 const $ = (id) => document.getElementById(id);
 const query = new URLSearchParams(location.search);
@@ -32,6 +33,9 @@ if (TOUCH_MODE) document.body.classList.add("touch-mode");
 const entryMode = query.get('mode');
 let gamePhase = 'DAY_COUNTER', personalHeld = false, nightHover = null;
 const reading = new ClosingReading(), shelving = new NightShelvingController();
+const clearing = new NightClearingController();
+let clearingDelay = 0, clearedDelay = 0, clearingAnnounced = false, doorVisitor = null;
+let nightFocus = null;
 const keys = new Set();
 const touchMove = { forward: 0, sideways: 0 };
 let touchLook = null;
@@ -167,6 +171,7 @@ const grain = new ShaderPass({
 composer.addPass(grain);
 const env = buildEnvironment(scene, { returnMode: isReturn });
 const nightWorld = buildShelvingWorld(scene, env.sortingShelves, shelving);
+const clearingWorld = buildClearingVisitors(scene, clearing);
 const personalModel = makeBook(personalReadingBook);
 const personalHome = [.7, 1.105, 1.69];
 personalModel.position.fromArray(personalHome);
@@ -298,7 +303,29 @@ function wait(seconds) {
   return tween(seconds, () => {});
 }
 const smooth = (x) => x * x * (3 - 2 * x);
-async function setCameraMode(mode, duration = 0.7, framing = "face") {
+async function setCameraMode(mode, duration = 0.7, framing = "face", actor = person) {
+  if (isNight()) {
+    if (mode === 'DIALOGUE_FOCUS') {
+      const face = actor.userData.head.getWorldPosition(new THREE.Vector3());
+      face.y -= .08;
+      const dx = face.x - camera.position.x, dz = camera.position.z - face.z;
+      const yaw = Math.atan2(-dx, dz);
+      nightFocus = {origin: camera.position.clone(), startYaw: camera.rotation.y,
+        startPitch: camera.rotation.x,
+        yaw: camera.rotation.y + Math.atan2(Math.sin(yaw - camera.rotation.y), Math.cos(yaw - camera.rotation.y)),
+        pitch: Math.atan2(face.y - camera.position.y, Math.hypot(dx, dz)), dx: 0, dy: 0};
+      cameraMode = 'DIALOGUE_FOCUS';
+    }
+    const from = focusBlend, to = mode === 'DIALOGUE_FOCUS' ? 1 : 0;
+    await tween(duration, t => focusBlend = THREE.MathUtils.lerp(from, to, smooth(t)));
+    cameraMode = mode;
+    if (mode === 'FREE_LOOK') {
+      camera.position.copy(nightFocus.origin);
+      camera.rotation.set(nightFocus.startPitch, nightFocus.startYaw, 0);
+      nightFocus = null;
+    }
+    return;
+  }
   cameraMode = mode;
   cameraBeat = mode === "DIALOGUE_FOCUS" ? framing : "free";
   if (mode === "DIALOGUE_FOCUS") {
@@ -433,12 +460,24 @@ async function start() {
   $("reticle").hidden = false;
   await wait(1.3);
   if (entryMode === 'closing') return beginClosingReading();
-  if (entryMode === 'shelving') {
+  if (['shelving', 'clearing'].includes(entryMode)) {
     env.setClosed();
     [1, 2, 3, 4].forEach(page => reading.readPages.add(page));
     document.querySelector('.clock').textContent = '22:00';
     camera.position.set(3.15, 1.85, 2.65);
     enterNight();
+    if (entryMode === 'clearing') {
+      for (const id of shelving.taskBookIds) {
+        const slot = shelving.slots.find(s => !s.occupantBookId && s.category === shelving.books.get(id).category);
+        shelving.pickup(id);
+        shelving.place(id, slot.shelfId, slot.slotId);
+        const model = nightWorld.books.get(id);
+        env.sortingShelves.get(slot.shelfId).add(model);
+        model.position.fromArray(slot.localPosition);
+        model.rotation.set(...slot.localRotation);
+      }
+      beginClearing();
+    }
     return;
   }
   await arriveVisit();
@@ -734,18 +773,20 @@ function enterNight() {
   inspectionLight.distance = 2.4;
   keys.clear();
   busy = false;
+  clearingWorld.group.visible = true;
   toast('WASD 行走 · 点击画面环顾 · R 查看手中的书');
 }
 async function nightInteract() {
   if (busy || !nightHover) return;
   const hit = nightHover;
+  if (hit.visitorId) return remindVisitor(hit.visitorId);
   if (!shelving.heldBookId) {
     const id = hit.bookId || hit.slot?.occupantBookId;
     if (!shelving.pickup(id)) return;
     if (gamePhase === 'NIGHT_SHELVING_COMPLETE') $('toast').hidden = true;
     book = nightWorld.books.get(id);
     busy = true;
-    gamePhase = 'NIGHT_SHELVING';
+    if (!clearing.active) gamePhase = 'NIGHT_SHELVING';
     bookPage = 0; bookOpen = false;
     angularX = angularY = 0;
     audio.paper(.022);
@@ -764,7 +805,7 @@ async function nightInteract() {
     audio.paper(.018);
     audio.tone(110, .07, .006);
     busy = false;
-    if (shelving.isTaskComplete()) {
+    if (shelving.isTaskComplete() && !clearing.active) {
       gamePhase = 'NIGHT_SHELVING_COMPLETE';
       toast('书都收起来了。', 1400);
     }
@@ -783,9 +824,14 @@ function updateNightHover() {
     const hand = new THREE.Vector3(camera.position.x, .8, camera.position.z);
     const hits = raycaster.intersectObjects(scene.children.filter(o => o !== camera && !Object.values(targets).includes(o)), true);
     for (const hit of hits) {
-      let node = hit.object, visible = true, bookId;
-      while (node) { visible &&= node.visible; bookId ||= node.userData.shelvingBookId; node = node.parent; }
+      let node = hit.object, visible = true, bookId, visitorId;
+      while (node) { visible &&= node.visible; bookId ||= node.userData.shelvingBookId; visitorId ||= node.userData.clearingVisitorId; node = node.parent; }
       if (!visible) continue;
+      if (visitorId) {
+        if (clearing.canTalkTo(visitorId, camera.position) && !shelving.heldBookId)
+          nightHover = {visitorId, distance: Math.hypot(camera.position.x - clearing.getVisitor(visitorId).position[0], camera.position.z - clearing.getVisitor(visitorId).position[2])};
+        break;
+      }
       if (hit.distance > 2.4 || hand.distanceTo(hit.point) > 1.5) break;
       const slot = shelving.slots.find(s => s.slotId === hit.object.userData.slotId);
       if (slot || bookId) nightHover = {slot, bookId, distance: hand.distanceTo(hit.point)};
@@ -793,8 +839,76 @@ function updateNightHover() {
       if (nightHover || !hit.object.material?.transparent) break;
     }
   }
-  const actionable = nightHover && (shelving.heldBookId ? nightHover.slot && !nightHover.slot.occupantBookId : nightHover.bookId || nightHover.slot?.occupantBookId);
+  const actionable = nightHover && (nightHover.visitorId || (shelving.heldBookId ? nightHover.slot && !nightHover.slot.occupantBookId : nightHover.bookId || nightHover.slot?.occupantBookId));
   $('reticle').classList.toggle('hot', !!actionable);
+  if (nightHover?.visitorId) {
+    $('interact').hidden = false;
+    $('interact').querySelector('span').textContent = '提醒闭馆';
+    $('interact').style.left = `${innerWidth / 2 + 19}px`;
+    $('interact').style.top = `${innerHeight / 2 + 19}px`;
+  }
+}
+function beginClearing() {
+  clearing.active = true;
+  gamePhase = 'NIGHT_CLEARING';
+  toast('还有人没走吗……', 1500);
+}
+async function remindVisitor(id) {
+  if (!clearing.startLeaveSequence(id, camera.position)) return;
+  const v = clearing.getVisitor(id), actor = clearingWorld.models.get(id).model;
+  busy = true;
+  keys.clear(); touchMove.forward = touchMove.sideways = 0;
+  if (v.type === 'child') await wait(.65);
+  const fromYaw = v.yaw, facing = Math.atan2(camera.position.x - v.position[0], camera.position.z - v.position[2]);
+  const turn = Math.atan2(Math.sin(facing - fromYaw), Math.cos(facing - fromYaw));
+  await Promise.all([
+    setCameraMode('DIALOGUE_FOCUS', .55, 'face', actor),
+    tween(.65, t => v.yaw = fromYaw + turn * smooth(t)),
+  ]);
+  dialogue(v.reminder, '你', 1.8);
+  await wait(v.type === 'headphones' ? 2.4 : 1.9);
+  dialogue(v.lines[0], v.name, 1.8);
+  await wait(2.3);
+  dialogue(v.lines[1], v.name, 1.8);
+  await wait(1.9);
+  clearing.prepare(id);
+  audio.paper(.014);
+  audio.tone(100, .18, .007);
+  const from = [...v.position];
+  const standAt = clearing.standPosition(id, camera.position);
+  await tween(.8, t => {
+    v.position = from.map((n, i) => THREE.MathUtils.lerp(n, standAt[i], smooth(t)));
+  });
+  await setCameraMode('FREE_LOOK', .45);
+  clearing.leave(id);
+  busy = false;
+}
+async function exitClearingVisitor(v) {
+  doorVisitor = v.id;
+  v.exiting = true;
+  audio.tone(210, .09, .007);
+  await tween(.5, t => env.door.rotation.y = -.95 * smooth(t));
+  audio.setDoorOpen(true);
+  const from = [...v.position];
+  const yaw = v.yaw;
+  await tween(.25, t => v.yaw = THREE.MathUtils.lerp(yaw, Math.PI, smooth(t)));
+  await tween(2.4, t => v.position[2] = THREE.MathUtils.lerp(from[2], -5.5, t));
+  await tween(.6, t => env.door.rotation.y = -.95 * (1 - smooth(t)));
+  audio.setDoorOpen(false);
+  doorVisitor = null;
+  // Continue along the outside pavement, beyond the side wall, before removing the model.
+  await tween(.3, t => v.yaw = THREE.MathUtils.lerp(Math.PI, Math.PI / 2, smooth(t)));
+  await tween(3.7, t => v.position[0] = THREE.MathUtils.lerp(2.85, 6, t));
+  clearing.markExited(v.id);
+}
+function moveNightLook(dx, dy) {
+  if (cameraMode === 'DIALOGUE_FOCUS' && nightFocus) {
+    nightFocus.dx = THREE.MathUtils.clamp(nightFocus.dx - dx * .0012, -.035, .035);
+    nightFocus.dy = THREE.MathUtils.clamp(nightFocus.dy - dy * .0012, -.026, .026);
+  } else if (!busy && cameraMode === 'FREE_LOOK') {
+    camera.rotation.y -= dx * .002;
+    camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - dy * .002, -1.35, 1.25);
+  }
 }
 function damageAtPointer() {
   if (gamePhase !== 'DAY_COUNTER' || !isReturn || tx.phase !== "BOOK_INSPECT" || busy || !$("settings").hidden)
@@ -1165,7 +1279,7 @@ $("ambience-volume").addEventListener("input", (event) =>
 );
 $("again").addEventListener("click", () => location.reload());
 $("case-label").textContent = isReturn ? "练习还书访客" : "练习借书访客";
-$("case-label").parentElement.hidden = isMemory || ['closing', 'shelving'].includes(entryMode);
+$("case-label").parentElement.hidden = isMemory || ['closing', 'shelving', 'clearing'].includes(entryMode);
 $("complete").querySelector("p").textContent = isReturn
   ? "本次还书处理已记录"
   : "本次借阅处理已记录";
@@ -1255,19 +1369,14 @@ window.addEventListener("pointermove", (event) => {
       dy = event.clientY - lastY;
     if (Math.hypot(event.clientX - touchLook.x, event.clientY - touchLook.y) > 6)
       touchLook.moved = true;
-    if (interactionPhase() === "BOOK_INSPECT") {
+    if (interactionPhase() === "BOOK_INSPECT" && !busy) {
       dragging = touchLook.moved;
       angularY = dx * 0.005;
       angularX = dy * 0.005;
       book.rotateY(angularY);
       book.rotateX(angularX);
     } else if (isNight()) {
-      camera.rotation.y -= dx * 0.002;
-      camera.rotation.x = THREE.MathUtils.clamp(
-        camera.rotation.x - dy * 0.002,
-        -1.35,
-        1.25,
-      );
+      moveNightLook(dx, dy);
     } else {
       targetYaw = THREE.MathUtils.clamp(targetYaw - dx * 0.002, -MAX_YAW, MAX_YAW);
       targetPitch = THREE.MathUtils.clamp(targetPitch - dy * 0.002, -MAX_PITCH, MAX_PITCH);
@@ -1277,17 +1386,14 @@ window.addEventListener("pointermove", (event) => {
     return;
   }
   if (isNight()) {
-    if (document.pointerLockElement !== renderer.domElement || busy) return;
-    if (cameraMode === 'OBJECT_INSPECT') {
+    if (document.pointerLockElement !== renderer.domElement) return;
+    if (cameraMode === 'OBJECT_INSPECT' && !busy) {
       if (press && (event.movementX || event.movementY)) {
         dragging = true;
         angularY = event.movementX * .005; angularX = event.movementY * .005;
         book.rotateY(angularY); book.rotateX(angularX);
       }
-    } else if (cameraMode === 'FREE_LOOK') {
-      camera.rotation.y -= event.movementX * .002;
-      camera.rotation.x = THREE.MathUtils.clamp(camera.rotation.x - event.movementY * .002, -1.35, 1.25);
-    }
+    } else moveNightLook(event.movementX, event.movementY);
     return;
   }
   pointer.set(
@@ -1497,9 +1603,16 @@ if (DEV_MODE) {
         slots: shelving.slots, books: [...shelving.books.values()],
         time: reading.time, page: reading.page, dwell: reading.dwell, advances: reading.advances,
         closingReady: reading.ready, closed: env.closed, personalHeld,
+        clearing: {active: clearing.active, visitors: clearing.visitors,
+          remaining: clearing.getLingeringVisitors().length, dialogueTarget: clearing.dialogueTarget,
+          talkDistance: clearing.talkDistance, hoveredVisitor: nightHover?.visitorId,
+          door: {lockedFromOutside: env.lockedFromOutside, canExitFromInside: env.canExitFromInside,
+            angle: env.door.rotation.y, visitorId: doorVisitor}},
       });
     },
     nightPosition(id) {
+      const visitor = clearingWorld.models.get(id)?.model;
+      if (visitor) return visitor.userData.head.getWorldPosition(new THREE.Vector3()).toArray();
       const object = nightWorld.books.get(id) || nightWorld.slotTargets.find(o => o.userData.slotId === id);
       return object?.getWorldPosition(new THREE.Vector3()).toArray();
     },
@@ -1654,7 +1767,12 @@ function frame(now) {
     camera.rotation.y = currentYaw;
     camera.rotation.x = -0.12 + currentPitch;
   }
-  const fov = 67 - 5 * focusBlend;
+  if (isNight() && nightFocus) {
+    camera.rotation.y = THREE.MathUtils.lerp(nightFocus.startYaw, nightFocus.yaw + nightFocus.dx, focusBlend);
+    camera.rotation.x = THREE.MathUtils.lerp(nightFocus.startPitch, nightFocus.pitch + nightFocus.dy, focusBlend);
+    camera.position.copy(nightFocus.origin).addScaledVector(new THREE.Vector3(-Math.sin(nightFocus.yaw), 0, -Math.cos(nightFocus.yaw)), .015 * focusBlend);
+  }
+  const fov = 67 - (isNight() ? 3.5 : 5) * focusBlend;
   if (camera.fov !== fov) {
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -1679,7 +1797,7 @@ function frame(now) {
         (TOUCH_MODE || document.pointerLockElement)) {
       const forward = Number(keys.has('KeyW')) - Number(keys.has('KeyS')) + touchMove.forward;
       const sideways = Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + touchMove.sideways;
-      const moving = moveWalker(camera.position, camera.rotation.y, forward, sideways, dt);
+      const moving = moveWalker(camera.position, camera.rotation.y, forward, sideways, dt, (x, z) => clearing.blocksPlayer(x, z));
       if (moving && time > nextFootstep) {
         audio.tone(115, .09, .014);
         audio.paper(.006);
@@ -1687,6 +1805,42 @@ function frame(now) {
       }
       if (moving && shelving.heldBookId) book.position.y = heldBookPosition[1] + Math.sin(time * 6) * .003;
     }
+    if (!clearing.active) {
+      clearingDelay = gamePhase === 'NIGHT_SHELVING_COMPLETE' && $('settings').hidden ? clearingDelay + dt : 0;
+      if (clearingDelay >= 2) beginClearing();
+    }
+    if ($('settings').hidden) {
+      clearing.update(dt, camera.position);
+      for (const v of clearing.visitors) {
+        if (v.state === 'LEAVING' && time > (v.nextStep || 0)) {
+          const distance = Math.hypot(v.position[0] - camera.position.x, v.position[2] - camera.position.z);
+          audio.tone(105, .09, .008 / (1 + distance));
+          v.nextStep = time + (v.type === 'elder' ? .75 : .6);
+        }
+      }
+      const child = clearing.getVisitor('child');
+      if (clearing.active && !child.hasBeenNoticed && cameraMode === 'FREE_LOOK' &&
+          Math.hypot(camera.position.x - child.position[0], camera.position.z - child.position[2]) < 1.5) {
+        const face = clearingWorld.models.get('child').model.userData.head.getWorldPosition(new THREE.Vector3());
+        const sight = new THREE.Raycaster(camera.position, face.clone().sub(camera.position).normalize(), 0, camera.position.distanceTo(face));
+        const obstruction = sight.intersectObjects(scene.children.filter(o => o !== camera && o !== clearingWorld.group), true)
+          .some(hit => hit.object.visible && !hit.object.material?.transparent);
+        if (!obstruction) clearing.notice('child');
+      }
+      if (!doorVisitor) {
+        const waiting = clearing.visitors.find(v => v.atDoor && !v.exiting && !v.hasExited);
+        if (waiting) guard(exitClearingVisitor(waiting));
+      }
+      if (clearing.isCleared() && !clearingAnnounced) {
+        clearedDelay += dt;
+        if (clearedDelay >= 1.5) {
+          clearingAnnounced = true;
+          toast('馆里已经没人了。', 1500);
+          guard(wait(1.5).then(() => gamePhase = 'NIGHT_CLEARING_COMPLETE'));
+        }
+      }
+    }
+    clearingWorld.update(dt, time);
   }
   if (person.visible) {
     person.userData.body.position.y = Math.sin(time * 1.3) * 0.004;
@@ -1718,7 +1872,7 @@ function frame(now) {
     $("mobile-stick").hidden = $("mobile-action").hidden = !isNight();
     $("mobile-inspect").disabled = !held && !inspecting;
     $("mobile-prev").hidden = $("mobile-next").hidden = !inspecting;
-    $("mobile-action").textContent = nightHover || hover ? "使用" : "观察";
+    $("mobile-action").textContent = nightHover?.visitorId ? '提醒闭馆' : nightHover || hover ? "使用" : "观察";
   }
   scene.updateMatrixWorld();
   updateCardFields();
@@ -1736,5 +1890,6 @@ function frame(now) {
         : "");
   if (DEV_MODE && gamePhase !== 'DAY_COUNTER')
     $('dev-panel').textContent = `${gamePhase} / ${cameraMode}\n${reading.time} · page ${bookPage} · dwell ${reading.dwell.toFixed(1)} · advances ${reading.advances} · ready ${reading.ready}\nheld ${shelving.heldBookId || '—'} / ${shelving.books.get(shelving.heldBookId)?.category || '—'}\nslot ${nightHover?.slot?.slotId || '—'} · occupied ${nightHover?.slot?.occupantBookId || '—'}\npending ${shelving.getPendingBooks().length} · correct ${shelving.getFinalLayout().filter(p => p.isCorrect).length} · wrong ${shelving.getFinalLayout().filter(p => !p.isCorrect).length}\nposition ${camera.position.toArray().map(n => n.toFixed(2)).join(', ')} · reach ${nightHover?.distance?.toFixed(2) || '—'}`;
+  if (DEV_MODE && isNight()) $('dev-panel').textContent += `\nRemaining Visitors ${clearing.getLingeringVisitors().length} · target ${clearing.dialogueTarget || '—'} · talk ${clearing.talkDistance}m\n${clearing.visitors.map(v => `${v.id}: ${v.state} · asked ${v.hasBeenAskedToLeave} · exited ${v.hasExited}`).join('\n')}\nDoor outside locked ${env.lockedFromOutside} · inside exit ${env.canExitFromInside} · angle ${env.door.rotation.y.toFixed(2)}`;
 }
 requestAnimationFrame(frame);
