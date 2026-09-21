@@ -87,13 +87,17 @@
       <span class="dialogue-mark">◦</span>
     </section>
     <div id="toast" hidden aria-live="polite"></div>
+    <div id="book-pages" hidden aria-label="书籍阅读">
+      <button id="book-read" hidden>翻开阅读</button>
+      <button id="mobile-prev" aria-label="上一页">上一页</button>
+      <span id="book-page-number" aria-live="polite"></span>
+      <button id="mobile-next" aria-label="下一页">翻开</button>
+    </div>
     <div id="mobile-controls" hidden aria-label="手机触屏操作">
       <div id="mobile-stick" aria-label="移动摇杆">
         <span></span>
       </div>
       <div class="mobile-actions">
-        <button id="mobile-prev" aria-label="上一页">‹</button>
-        <button id="mobile-next" aria-label="下一页">›</button>
         <button id="mobile-inspect" aria-label="进入或退出检视">R</button>
         <button id="mobile-action" aria-label="使用">使用</button>
       </div>
@@ -119,7 +123,7 @@
       </div>
       <p>
         左键点击物件，拿到右手；点击目标位置使用或放置。<br />
-        R 进入 / 退出书籍检视，按住左键拖动旋转，滚轮翻页。<br />
+        R 进入 / 退出书籍检视，按住左键拖动旋转，点击“翻开”或用滚轮、左右方向键翻页。<br />
         点击证件照片、姓名或日期直接提问；点击顾客递还证件。<br />
         还书时，在检视中短按书上可疑位置提问；或将手中的书放入归还托盘。<br />
         闭馆后 WASD 行走，点击画面环顾；对准书拿起，对准空书位放入。<br />

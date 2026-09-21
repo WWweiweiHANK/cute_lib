@@ -14,6 +14,7 @@ async function touch(selector, type, x, y) {
     isPrimary: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1});
 }
 async function turn(yaw, pitch = -.12) {
+  if (!mobile) { mx = 800; my = 450; await page.mouse.move(mx,my); }
   const s = await state();
   const dx = -Math.atan2(Math.sin(yaw-s.yaw), Math.cos(yaw-s.yaw))/.002, dy = -(pitch-s.pitch)/.002;
   if (mobile) {
@@ -59,6 +60,7 @@ async function click() {
 async function inspect() {
   if (mobile) await page.locator('#mobile-inspect').tap(); else await page.keyboard.press('r');
   await ready();
+  if (!mobile && (await state()).cameraMode === 'OBJECT_INSPECT') await page.mouse.move(800,450);
 }
 async function take(id) { await aim(id); await click(); await ready(); assert.equal((await state()).heldBookId,id); }
 async function place(id) {

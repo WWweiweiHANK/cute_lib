@@ -701,8 +701,30 @@ footer {
   border-radius: 50%;
 }
 #mobile-inspect { grid-column: 2; grid-row: 2; }
-#mobile-prev { grid-column: 1; grid-row: 1; }
-#mobile-next { grid-column: 2; grid-row: 1; }
+#book-pages {
+  position: fixed;
+  bottom: max(24px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #d9ccb0;
+  font-size: 12px;
+}
+#book-pages button {
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid #d2bd8a66;
+  border-radius: 4px;
+  color: #eadfc7;
+  background: #152220ee;
+  touch-action: manipulation;
+}
+#book-pages button:disabled { opacity: .4; }
+#book-page-number { min-width: 42px; text-align: center; }
+body.touch-mode #book-pages { bottom: max(140px, env(safe-area-inset-bottom)); }
 #rotate-phone {
   position: fixed;
   inset: 0;

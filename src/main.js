@@ -427,7 +427,7 @@ function updateUI() {
       $("inspect-help").hidden = false;
       $("inspect-help").innerHTML =
         s === "BOOK_INSPECT"
-          ? "<span>左键拖动</span>旋转 <span>滚轮</span>翻页 <span>R</span>回到手中"
+          ? "<span>左键拖动</span>旋转 <span>左右方向键 / 滚轮</span>翻页 <span>R</span>回到手中"
           : s === "BOOK_HELD"
             ? "<span>R</span>仔细查看 <span>左键</span>点击目标使用"
             : "点击证件信息提问 · 点击顾客递还";
@@ -612,6 +612,7 @@ async function exitInspect() {
   cameraMode = isNight() ? 'FREE_LOOK' : 'COUNTER_FREE';
   busy = false;
   updateUI();
+  if (isNight()) requestLook();
   if (gamePhase === 'CLOSING_READING' && reading.ready) await finishReading();
 }
 async function putBack() {
@@ -627,13 +628,14 @@ async function inspectAgain() {
   busy = true;
   book.userData.preparePages();
   cameraMode = "OBJECT_INSPECT";
+  if (document.pointerLockElement) document.exitPointerLock();
   updateUI();
   audio.paper();
   await transform(book, camera, [0.12, gamePhase === 'CLOSING_READING' ? -.13 : -0.025, -1.35], [0.02, -0.07, 0.015]);
   busy = false;
 }
 async function flip(direction) {
-  if (interactionPhase() !== "BOOK_INSPECT" || busy) return;
+  if (!started || !$("settings").hidden || interactionPhase() !== "BOOK_INSPECT" || busy) return;
   const next = THREE.MathUtils.clamp(
     bookPage + direction,
     0,
@@ -1308,7 +1310,7 @@ $("settings-open").addEventListener(
 );
 $("settings-close").addEventListener(
   "click",
-  () => { $('settings').hidden = true; if (isNight()) requestLook(); },
+  () => { $('settings').hidden = true; if (isNight() && cameraMode !== 'OBJECT_INSPECT') requestLook(); },
 );
 $("start").addEventListener("click", () => guard(start()));
 $("sound").addEventListener("click", () => {
@@ -1386,6 +1388,10 @@ window.addEventListener("keydown", (event) => {
     press = null;
     angularX = angularY = 0;
   }
+  if (interactionPhase() === 'BOOK_INSPECT' && ['arrowleft', 'arrowright'].includes(key)) {
+    event.preventDefault();
+    guard(flip(key === 'arrowright' ? 1 : -1));
+  }
   if (key === "r" && $("card-choice").hidden)
     guard(interactionPhase() === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
 });
@@ -1397,7 +1403,7 @@ function requestLook() {
 }
 document.addEventListener('pointerlockchange', () => {
   keys.clear(); press = null; dragging = false; angularX = angularY = 0;
-  if (!TOUCH_MODE && isNight() && !document.pointerLockElement && started) $('settings').hidden = false;
+  if (!TOUCH_MODE && isNight() && cameraMode !== 'OBJECT_INSPECT' && !document.pointerLockElement && started) $('settings').hidden = false;
 });
 window.addEventListener("pointermove", (event) => {
   if (!$("settings").hidden || !$("card-choice").hidden) return;
@@ -1426,17 +1432,11 @@ window.addEventListener("pointermove", (event) => {
     lastY = event.clientY;
     return;
   }
-  if (isNight()) {
-    if (document.pointerLockElement !== renderer.domElement) return;
-    if (cameraMode === 'OBJECT_INSPECT' && !busy) {
-      if (press && (event.movementX || event.movementY)) {
-        dragging = true;
-        angularY = event.movementX * .005; angularX = event.movementY * .005;
-        book.rotateY(angularY); book.rotateX(angularX);
-      }
-    } else moveNightLook(event.movementX, event.movementY);
+  if (isNight() && document.pointerLockElement === renderer.domElement) {
+    moveNightLook(event.movementX, event.movementY);
     return;
   }
+  if (isNight() && cameraMode !== 'OBJECT_INSPECT') return;
   pointer.set(
     (event.clientX / innerWidth) * 2 - 1,
     1 - (event.clientY / innerHeight) * 2,
@@ -1479,7 +1479,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
     lastX = event.clientX;
     lastY = event.clientY;
   }
-  if (!TOUCH_MODE && isNight() && document.pointerLockElement !== renderer.domElement) { requestLook(); return; }
+  if (!TOUCH_MODE && isNight() && cameraMode !== 'OBJECT_INSPECT' && document.pointerLockElement !== renderer.domElement) { requestLook(); return; }
   if (interactionPhase() === "BOOK_INSPECT" && !busy) {
     pointer.set(
       (event.clientX / innerWidth) * 2 - 1,
@@ -1496,7 +1496,7 @@ renderer.domElement.addEventListener("pointerdown", (event) => {
     angularX = angularY = 0;
     lastX = event.clientX;
     lastY = event.clientY;
-    if (!isNight()) renderer.domElement.setPointerCapture(event.pointerId);
+    if (!document.pointerLockElement) renderer.domElement.setPointerCapture(event.pointerId);
   } else {
     if (TOUCH_MODE && event.pointerType === "touch") return;
     if (isNight()) { updateNightHover(); guard(nightInteract()); return; }
@@ -1588,6 +1588,10 @@ function mobileInspect() {
   if (!started || busy || !$("settings").hidden) return;
   guard(interactionPhase() === "BOOK_INSPECT" ? exitInspect() : inspectAgain());
 }
+$("book-read").addEventListener("click", () => {
+  if (!started || busy || !$("settings").hidden) return;
+  guard((async () => { await inspectAgain(); await flip(1); })());
+});
 $("mobile-action").addEventListener("click", mobileAction);
 $("mobile-inspect").addEventListener("click", mobileInspect);
 $("mobile-prev").addEventListener("click", () => guard(flip(-1)));
@@ -1919,12 +1923,21 @@ function frame(now) {
     angularX *= decay;
   }
   grain.uniforms.uTime.value = time;
+  const inspectingBook = interactionPhase() === 'BOOK_INSPECT';
+  const holdingBook = ['BOOK_HELD', 'RETURN_BOOK_HELD'].includes(interactionPhase());
+  $('book-pages').hidden = !started || !$('settings').hidden || (!inspectingBook && (!holdingBook || !!document.pointerLockElement));
+  $('book-read').hidden = inspectingBook;
+  $('book-read').disabled = busy;
+  $('mobile-prev').hidden = $('mobile-next').hidden = $('book-page-number').hidden = !inspectingBook;
+  $('mobile-prev').disabled = busy || bookPage === 0;
+  $('mobile-next').disabled = busy || bookPage >= book.userData.pages.length;
+  $('mobile-next').textContent = bookPage === 0 ? '翻开' : '下一页';
+  $('book-page-number').textContent = bookPage === 0 ? '封面' : bookPage + ' / ' + book.userData.pages.length;
   if (TOUCH_MODE && started) {
     const inspecting = interactionPhase() === "BOOK_INSPECT",
       held = personalHeld || shelving.heldBookId || tx.phase === "BOOK_HELD" || tx.phase === "RETURN_BOOK_HELD";
     $("mobile-stick").hidden = $("mobile-action").hidden = !isNight();
     $("mobile-inspect").disabled = !held && !inspecting;
-    $("mobile-prev").hidden = $("mobile-next").hidden = !inspecting;
     $("mobile-action").textContent = nightHover?.recommendation ? recommendationWorld.label : nightHover?.visitorId ? '提醒闭馆' : nightHover || hover ? "使用" : "观察";
   }
   scene.updateMatrixWorld();
